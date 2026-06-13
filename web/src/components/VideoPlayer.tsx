@@ -43,9 +43,8 @@ export default function VideoPlayer({ streamUrl, streamType, clearKeys, title }:
             throw new Error('Shaka Player is not supported in this browser.');
           }
 
-          const player = new shaka.Player();
+          const player = new shaka.Player(video);
           shakaPlayerRef.current = player;
-          await player.attach(video);
 
           if (clearKeys && Object.keys(clearKeys).length > 0) {
             setDrmType('ClearKey DRM');
