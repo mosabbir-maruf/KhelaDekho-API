@@ -330,6 +330,22 @@ async function getCachedScrape(c) {
   return freshData;
 }
 
+// Endpoints: Root / Welcome
+app.get('/', (c) => {
+  return c.json(makeResponse(true, {
+    message: "Welcome to KhelaDekho API Cloudflare Worker!",
+    endpoints: {
+      health: "/api/v1/health",
+      matches: "/api/v1/matches",
+      channels: "/api/v1/channels",
+      stats: "/api/v1/stats"
+    }
+  }));
+});
+
+// Alias: /health -> /api/v1/health
+app.get('/health', (c) => c.redirect('/api/v1/health', 301));
+
 // Endpoints: Root / Health check
 app.get('/api/v1/health', rateLimiterMiddleware(100, 60), async (c) => {
   return c.json(makeResponse(true, {
