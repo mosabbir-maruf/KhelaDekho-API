@@ -2,7 +2,8 @@ import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Trophy, ArrowLeft, Calendar, Shield } from 'lucide-react';
-import { mockLeagues, mockMatches } from '../../../lib/mockData';
+import { mockLeagues } from '../../../lib/mockData';
+import { getMatches } from '../../../lib/api';
 import MatchCard from '../../../components/MatchCard';
 
 interface PageProps {
@@ -17,8 +18,14 @@ export default async function LeaguePage({ params }: PageProps) {
     notFound();
   }
 
-  // Get matches belonging to this league
-  const leagueMatches = mockMatches.filter(m => m.league_id === league.id);
+  // Get matches belonging to this league from the live API
+  const matchesData = await getMatches();
+  const leagueMatches = matchesData.matches.filter(m => 
+    m.league_id === league.id || 
+    m.group.toLowerCase().includes(league.id.toLowerCase()) || 
+    m.stage.toLowerCase().includes(league.id.toLowerCase()) ||
+    league_key === 'fifa-world-cup' // fallback since parsed matches are World Cup matches
+  );
   const liveMatches = leagueMatches.filter(m => m.status === 'live');
   const upcomingMatches = leagueMatches.filter(m => m.status === 'upcoming');
 
