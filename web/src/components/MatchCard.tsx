@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { Calendar, Play, CheckCircle } from 'lucide-react';
-import { Match } from '../lib/mockData';
+import { Match } from '../lib/types';
 
 interface MatchCardProps {
   match: Match;

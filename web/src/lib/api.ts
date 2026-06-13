@@ -1,4 +1,4 @@
-import { mockMatches, mockChannels, mockStats, Match, ChannelInfo, PlatformStats } from './mockData';
+import { Match, ChannelInfo, PlatformStats } from './types';
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const SECRET_KEY = process.env.KHELADEKHO_SECRET_KEY || 'production-super-secret-key-fallback-change-me';

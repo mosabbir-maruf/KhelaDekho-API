@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { Trophy, ArrowLeft, Calendar, Shield } from 'lucide-react';
-import { mockLeagues } from '../../../lib/mockData';
+import { leagueDirectory } from '../../../lib/types';
 import { getMatches } from '../../../lib/api';
 import MatchCard from '../../../components/MatchCard';
 
@@ -12,7 +12,7 @@ interface PageProps {
 
 export default async function LeaguePage({ params }: PageProps) {
   const { league_key } = await params;
-  const league = mockLeagues.find(lg => lg.id === league_key);
+  const league = leagueDirectory[league_key];
 
   if (!league) {
     notFound();
@@ -64,38 +64,12 @@ export default async function LeaguePage({ params }: PageProps) {
             <Trophy className="h-5 w-5 text-zinc-400" />
             <h2 className="text-lg font-bold text-white">Standings Table</h2>
           </div>
-          <div className="overflow-x-auto rounded-2xl border border-white/5 bg-zinc-950/30 backdrop-blur-md">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead>
-                <tr className="border-b border-white/5 bg-[#0e0e11] text-zinc-500 font-semibold uppercase tracking-wider">
-                  <th className="py-4 px-5 w-12 text-center">Pos</th>
-                  <th className="py-4 px-5">Team</th>
-                  <th className="py-4 px-5 text-center">P</th>
-                  <th className="py-4 px-5 text-center">W</th>
-                  <th className="py-4 px-5 text-center">D</th>
-                  <th className="py-4 px-5 text-center">L</th>
-                  <th className="py-4 px-5 text-center">Goals</th>
-                  <th className="py-4 px-5 text-center">PTS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {league.standings.map((team) => (
-                  <tr key={team.team} className="border-b border-white/5 hover:bg-white/[0.01] transition-colors font-medium text-zinc-300">
-                    <td className="py-4 px-5 text-center font-bold text-white">{team.rank}</td>
-                    <td className="py-4 px-5 flex items-center gap-3">
-                      <Shield className="h-4.5 w-4.5 text-zinc-600" />
-                      <span className="font-semibold text-white">{team.team}</span>
-                    </td>
-                    <td className="py-4 px-5 text-center tabular-nums">{team.played}</td>
-                    <td className="py-4 px-5 text-center tabular-nums">{team.won}</td>
-                    <td className="py-4 px-5 text-center tabular-nums">{team.drawn}</td>
-                    <td className="py-4 px-5 text-center tabular-nums">{team.lost}</td>
-                    <td className="py-4 px-5 text-center tabular-nums text-zinc-500">{team.goals}</td>
-                    <td className="py-4 px-5 text-center tabular-nums font-bold text-white">{team.points}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="overflow-x-auto rounded-2xl border border-white/5 bg-zinc-950/30 backdrop-blur-md p-8 text-center flex flex-col items-center justify-center min-h-[200px]">
+            <Trophy className="h-8 w-8 text-zinc-700 mb-3 animate-pulse" />
+            <h3 className="text-sm font-semibold text-zinc-400">Standings Unavailable</h3>
+            <p className="text-xs text-zinc-500 mt-1 max-w-xs">
+              Live standings are currently not served by the API.
+            </p>
           </div>
         </div>
 

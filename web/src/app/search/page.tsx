@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { Search, Compass, ChevronRight, Activity } from 'lucide-react';
 import { getMatches, getChannels } from '../../lib/api';
 import MatchCard from '../../components/MatchCard';
-import { Match, ChannelInfo } from '../../lib/mockData';
+import { Match, ChannelInfo } from '../../lib/types';
 
 interface PageProps {
   searchParams: Promise<{ q?: string }>;
