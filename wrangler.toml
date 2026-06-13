@@ -1,0 +1,8 @@
+name = "kheladekho-worker"
+main = "worker/src/index.js"
+compatibility_date = "2026-06-13"
+
+[vars]
+TARGET_URL = "https://livekhela.tv/"
+SECRET_KEY = "production-super-secret-key-fallback-change-me"
+SIGNATURE_WINDOW_SECONDS = "60"
