@@ -1,0 +1,14 @@
+name = "kheladekho-worker"
+main = "src/index.js"
+compatibility_date = "2026-06-13"
+
+[vars]
+TARGET_URL = "https://livekhela.tv/"
+SECRET_KEY = "production-super-secret-key-fallback-change-me"
+SIGNATURE_WINDOW_SECONDS = "60"
+
+# Bind a KV namespace for rate limiting and fallback caching
+# To use: wrangler kv:namespace create KHELADEKHO_STORE
+# [[kv_namespaces]]
+# binding = "KHELADEKHO_STORE"
+# id = "your-kv-namespace-id"

@@ -274,3 +274,37 @@ curl -X GET "${BASE_URL}${PATH_URI}" \
   -H "X-Signature-Token: ${TOKEN}" \
   -H "X-Signature-Timestamp: ${TIMESTAMP}"
 ```
+
+---
+
+## Cloudflare Workers Deployment (Hono + Cheerio Version)
+
+We have created an alternative **JavaScript Node-compatible Cloudflare Workers version** of this API under the `/worker` directory. This is optimized to run at Cloudflare's Edge locations with 0ms cold starts, and scale to millions of requests seamlessly.
+
+### File Structure of Worker
+- [worker/package.json](file:///Volumes/Mosabbir/Developement/Project/stream-api/worker/package.json) - Node dependencies for Worker.
+- [worker/wrangler.toml](file:///Volumes/Mosabbir/Developement/Project/stream-api/worker/wrangler.toml) - Cloudflare wrangler configurations.
+- [worker/src/index.js](file:///Volumes/Mosabbir/Developement/Project/stream-api/worker/src/index.js) - Complete Hono router logic, Cheerio scraper parsing, edge caching, rate limiting, and HMAC signature check.
+
+### How to Run Locally (Worker)
+1. Navigate into the worker directory:
+   ```bash
+   cd worker
+   ```
+2. Install npm dependencies:
+   ```bash
+   npm install
+   ```
+3. Run the wrangler development server:
+   ```bash
+   npm run dev
+   ```
+   The local edge server will run at `http://localhost:8787`.
+
+### How to Deploy (Worker)
+Log in to your Cloudflare account and deploy to your subdomain using:
+```bash
+npx wrangler login
+npm run deploy
+```
+
