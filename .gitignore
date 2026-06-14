@@ -116,3 +116,8 @@ venv.bak/
 # Frontend build and dependencies
 frontend/node_modules/
 frontend/dist/
+
+# Worker build and dependencies
+worker/node_modules/
+worker/dist/
+.wrangler/

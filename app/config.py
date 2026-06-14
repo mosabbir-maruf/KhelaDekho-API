@@ -5,7 +5,7 @@ BDT = timezone(timedelta(hours=6))
 
 
 class Settings(BaseSettings):
-    target_url: str = "https://livekhela.tv/"
+    target_url: str = ""
     user_agent: str = (
         "Mozilla/5.0 (compatible; KhelaDekhoAggregator/1.0; "
         "+https://github.com/mosabbir-maruf/kheladekho)"

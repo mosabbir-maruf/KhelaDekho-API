@@ -130,7 +130,7 @@ const rateLimiterMiddleware = (requests = 60, windowSecs = 60) => {
 
 // Cryptographic HMAC-SHA256 Signature Middleware (Anti-Hotlinking)
 const verifySignature = async (c, next) => {
-  const secret = c.env.SECRET_KEY;
+  const secret = c.env.KHELADEKHO_SECRET_KEY || c.env.SECRET_KEY;
   if (!secret) {
     return c.json(makeResponse(false, null, {
       code: "HTTP_500",
@@ -310,7 +310,7 @@ async function scrapeAll(targetUrl) {
 
 // Cache Stamede-Proof Getter using Cloudflare Cache API
 async function getCachedScrape(c) {
-  const targetUrl = c.env.TARGET_URL || "https://livekhela.tv/";
+  const targetUrl = c.env.KHELADEKHO_TARGET_URL || c.env.TARGET_URL;
   
   // Cloudflare native cache
   const cacheKey = new Request("http://kheladekho-cache.internal/data", { method: "GET" });
@@ -579,12 +579,13 @@ app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), v
   
   // Post target request
   try {
-    const res = await fetch('https://livekhela.tv/api/channel', {
+    const baseUrl = targetUrl.replace(/\/+$/, '');
+    const res = await fetch(`${baseUrl}/api/channel`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
-        'Origin': 'https://livekhela.tv',
-        'Referer': 'https://livekhela.tv/',
+        'Origin': baseUrl,
+        'Referer': `${baseUrl}/`,
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/119.0'
       },
       body: new URLSearchParams({

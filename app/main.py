@@ -420,11 +420,12 @@ async def get_channel_stream(
     # Call target API to get stream payload
     headers = build_headers()
     headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8"
-    headers["Origin"] = "https://livekhela.tv"
-    headers["Referer"] = "https://livekhela.tv/"
+    base_url = settings.target_url.rstrip("/")
+    headers["Origin"] = base_url
+    headers["Referer"] = f"{base_url}/"
 
     data = {"key": channel.key, "access": channel.play_token}
-    play_url = "https://livekhela.tv/api/channel"
+    play_url = f"{base_url}/api/channel"
     
     try:
         res = await client.post(play_url, headers=headers, data=data, timeout=5.0)
