@@ -308,6 +308,9 @@ async function scrapeAll(targetUrl) {
   };
 }
 
+// Global lock to prevent cache stampedes
+let scrapingPromise = null;
+
 // Cache Stamede-Proof Getter using Cloudflare Cache API
 async function getCachedScrape(c) {
   const targetUrl = c.env.KHELADEKHO_TARGET_URL;
@@ -321,19 +324,29 @@ async function getCachedScrape(c) {
     return await cachedResponse.json();
   }
   
-  // Fetch fresh
-  const freshData = await scrapeAll(targetUrl);
+  // If a scrape is already in progress, await it instead of launching another one
+  if (scrapingPromise) {
+    return await scrapingPromise;
+  }
   
-  // Store in cache for 120 seconds
-  const responseToStore = new Response(JSON.stringify(freshData), {
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'max-age=120'
-    }
-  });
-  c.executionCtx.waitUntil(cache.put(cacheKey, responseToStore));
-  
-  return freshData;
+  // Fetch fresh with lock
+  scrapingPromise = scrapeAll(targetUrl)
+    .then(freshData => {
+      // Store in cache for 120 seconds
+      const responseToStore = new Response(JSON.stringify(freshData), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'max-age=120'
+        }
+      });
+      c.executionCtx.waitUntil(cache.put(cacheKey, responseToStore));
+      return freshData;
+    })
+    .finally(() => {
+      scrapingPromise = null;
+    });
+    
+  return await scrapingPromise;
 }
 
 // Endpoints: Root / Welcome
