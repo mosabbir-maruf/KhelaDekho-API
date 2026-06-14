@@ -2,6 +2,9 @@ name = "kheladekho-api"
 main = "src/index.js"
 compatibility_date = "2026-06-13"
 
+[observability]
+enabled = true
+
 [vars]
 KHELADEKHO_TARGET_URL = "https://livekhela.tv/"
 SIGNATURE_WINDOW_SECONDS = "60"
