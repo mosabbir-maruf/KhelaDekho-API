@@ -396,6 +396,17 @@ app.get('/api/v1/matches', rateLimiterMiddleware(100, 60), async (c) => {
   }));
 });
 
+// Endpoints: Live Matches Helper
+app.get('/api/v1/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
+  const scrape = await getCachedScrape(c);
+  const live = scrape.matches.filter(m => m.status === 'live');
+  return c.json(makeResponse(true, {
+    matches: live,
+    total: live.length,
+    cached_at: scrape.fetched_at
+  }));
+});
+
 // Endpoints: Single Match
 app.get('/api/v1/matches/:match_id', rateLimiterMiddleware(100, 60), async (c) => {
   const matchId = c.req.param('match_id');
@@ -410,17 +421,6 @@ app.get('/api/v1/matches/:match_id', rateLimiterMiddleware(100, 60), async (c) =
   }
   
   return c.json(makeResponse(true, match));
-});
-
-// Endpoints: Live Matches Helper
-app.get('/api/v1/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
-  const scrape = await getCachedScrape(c);
-  const live = scrape.matches.filter(m => m.status === 'live');
-  return c.json(makeResponse(true, {
-    matches: live,
-    total: live.length,
-    cached_at: scrape.fetched_at
-  }));
 });
 
 // Endpoints: List Channels
