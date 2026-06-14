@@ -310,7 +310,7 @@ async function scrapeAll(targetUrl) {
 
 // Cache Stamede-Proof Getter using Cloudflare Cache API
 async function getCachedScrape(c) {
-  const targetUrl = c.env.KHELADEKHO_TARGET_URL || c.env.TARGET_URL;
+  const targetUrl = c.env.KHELADEKHO_TARGET_URL;
   
   // Cloudflare native cache
   const cacheKey = new Request("http://kheladekho-cache.internal/data", { method: "GET" });
@@ -579,7 +579,7 @@ app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), v
   
   // Post target request
   try {
-    const targetUrl = c.env.KHELADEKHO_TARGET_URL || c.env.TARGET_URL || "https://livekhela.tv/";
+    const targetUrl = c.env.KHELADEKHO_TARGET_URL;
     const baseUrl = targetUrl.replace(/\/+$/, '');
     const res = await fetch(`${baseUrl}/api/channel`, {
       method: 'POST',
