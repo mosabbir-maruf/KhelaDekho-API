@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
@@ -435,13 +436,17 @@ async def get_channel_stream(
     data = {"key": channel.key, "access": channel.play_token}
     play_url = f"{base_url}/api/channel"
     
-    try:
-        res = await client.post(play_url, headers=headers, data=data, timeout=10.0)
-        res.raise_for_status()
-        resp_json = res.json()
-    except Exception as e:
-        logger.error("stream_api_request_failed", key=channel.key, error=str(e))
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch stream details from source")
+    for attempt in range(3):
+        try:
+            res = await client.post(play_url, headers=headers, data=data, timeout=10.0)
+            res.raise_for_status()
+            resp_json = res.json()
+            break
+        except Exception as e:
+            if attempt == 2:
+                logger.error("stream_api_request_failed", key=channel.key, error=str(e), attempts=attempt + 1)
+                raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch stream details from source")
+            await asyncio.sleep(1.0 * (attempt + 1))
 
     if not resp_json.get("success") or not resp_json.get("payload"):
         logger.error("stream_api_error", key=channel.key, response=resp_json)
