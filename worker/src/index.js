@@ -51,7 +51,7 @@ const makeResponse = (success, data = null, error = null) => ({
 app.use('*', cors({
   origin: '*', // Can restrict to allowed origins via env
   allowMethods: ['GET', 'OPTIONS'],
-  allowHeaders: ['X-Signature-Token', 'X-Signature-Timestamp', 'Content-Type']
+  allowHeaders: ['X-Signature-Token', 'X-Signature-Timestamp', 'Content-Type', 'User-Agent']
 }));
 
 // Centralized Error Middleware
