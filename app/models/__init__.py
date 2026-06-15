@@ -97,6 +97,8 @@ class StreamSource(BaseModel):
     url: str
     type: str
     is_primary: bool
+    name: Optional[str] = None
+    platform: Optional[str] = None
 
 
 class ClearKeyData(BaseModel):
