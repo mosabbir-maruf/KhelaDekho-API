@@ -436,7 +436,7 @@ async def get_channel_stream(
     play_url = f"{base_url}/api/channel"
     
     try:
-        res = await client.post(play_url, headers=headers, data=data, timeout=5.0)
+        res = await client.post(play_url, headers=headers, data=data, timeout=10.0)
         res.raise_for_status()
         resp_json = res.json()
     except Exception as e:
@@ -467,7 +467,7 @@ async def get_channel_stream(
         expires_at=expires_at,
     )
 
-    # Cache stream info for 30 seconds
-    await cache.set("stream", channel_key, response_data, ttl=30)
+    # Cache stream info for 15 seconds (shorter to reduce stale token errors)
+    await cache.set("stream", channel_key, response_data, ttl=15)
     
     return StandardResponse(success=True, data=response_data)
