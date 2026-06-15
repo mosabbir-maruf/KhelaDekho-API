@@ -23,6 +23,7 @@ from app.models import (
     Match,
     MatchListResponse,
     ChannelInfo,
+    ChannelInfoPublic,
     ChannelListResponse,
     PlatformStatsResponse,
     HealthResponse,
@@ -79,7 +80,6 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allow_origins,
-    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -100,7 +100,7 @@ if os.path.exists(frontend_dist):
     app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse, dependencies=[Depends(rate_limit_std)])
 async def serve_player():
     if os.path.exists(frontend_dist):
         prod_index = os.path.join(frontend_dist, "index.html")
@@ -263,11 +263,15 @@ async def list_channels(
 
     total = len(channels)
     page = channels[offset : offset + limit]
+    public_channels = [
+        ChannelInfoPublic(**ch.model_dump(exclude={"play_token", "play_exp"}))
+        for ch in page
+    ]
 
     return StandardResponse(
         success=True,
         data=ChannelListResponse(
-            channels=page,
+            channels=public_channels,
             total=total,
             cached_at=scrape.fetched_at,
         ),
@@ -285,10 +289,14 @@ async def list_live_channels():
     scrape = await _get_cached_scrape()
     live = [c for c in scrape.channels if c.status == "live"]
     live.sort(key=lambda c: (-c.live_viewers, c.sort_order))
+    public_live = [
+        ChannelInfoPublic(**ch.model_dump(exclude={"play_token", "play_exp"}))
+        for ch in live
+    ]
     return StandardResponse(
         success=True,
         data=ChannelListResponse(
-            channels=live,
+            channels=public_live,
             total=len(live),
             cached_at=scrape.fetched_at,
         )

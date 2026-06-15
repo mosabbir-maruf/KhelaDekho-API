@@ -52,6 +52,22 @@ class ChannelInfo(BaseModel):
     fetched_at: datetime = Field(default_factory=lambda: datetime.now(BDT))
 
 
+class ChannelInfoPublic(BaseModel):
+    """Channel info without sensitive fields (play_token, play_exp)."""
+    key: str
+    name: str
+    image_url: Optional[str] = None
+    category: str = "Sports"
+    quality: str = "HD"
+    status: str = "live"
+    sort_order: int = 99
+    total_views: int = 0
+    live_viewers: int = 0
+    resolution: str = "Auto"
+    source_types: List[str] = Field(default_factory=list)
+    fetched_at: datetime = Field(default_factory=lambda: datetime.now(BDT))
+
+
 class PlatformStats(BaseModel):
     live_viewers: int = 0
     all_views: int = 0
@@ -75,7 +91,7 @@ class MatchListResponse(BaseModel):
 
 
 class ChannelListResponse(BaseModel):
-    channels: List[ChannelInfo]
+    channels: List[ChannelInfoPublic]
     total: int
     cached_at: datetime
 

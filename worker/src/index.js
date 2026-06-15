@@ -122,7 +122,7 @@ const rateLimiterMiddleware = (requests = 60, windowSecs = 60) => {
 
 // Cryptographic HMAC-SHA256 Signature Middleware (Anti-Hotlinking)
 const verifySignature = async (c, next) => {
-  const secret = c.env.KHELADEKHO_SECRET_KEY || c.env.SECRET_KEY;
+  const secret = c.env.KHELADEKHO_SECRET_KEY;
   if (!secret) {
     return c.json(makeResponse(false, null, {
       code: "HTTP_500",
@@ -330,6 +330,11 @@ async function scrapeAll(targetUrl) {
   }
 }
 
+// Strip sensitive fields before returning channel data to clients
+function sanitizeChannels(channels) {
+  return channels.map(({ play_token, play_exp, ...rest }) => rest);
+}
+
 // Global lock to prevent cache stampedes
 let scrapingPromise = null;
 
@@ -372,7 +377,7 @@ async function getCachedScrape(c) {
 }
 
 // Endpoints: Root / Welcome
-app.get('/', (c) => {
+app.get('/', rateLimiterMiddleware(100, 60), (c) => {
   return c.json(makeResponse(true, {
     message: "Welcome to KhelaDekho API Cloudflare Worker!",
     endpoints: {
@@ -482,7 +487,7 @@ app.get('/api/v1/channels', rateLimiterMiddleware(100, 60), async (c) => {
   const page = channels.slice(offset, offset + limit);
   
   return c.json(makeResponse(true, {
-    channels: page,
+    channels: sanitizeChannels(page),
     total,
     cached_at: scrape.fetched_at
   }));
@@ -495,7 +500,7 @@ app.get('/api/v1/channels/live', rateLimiterMiddleware(100, 60), async (c) => {
   live.sort((a, b) => b.live_viewers - a.live_viewers || a.sort_order - b.sort_order);
   
   return c.json(makeResponse(true, {
-    channels: live,
+    channels: sanitizeChannels(live),
     total: live.length,
     cached_at: scrape.fetched_at
   }));
