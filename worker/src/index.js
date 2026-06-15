@@ -18,14 +18,6 @@ function safeInt(value, def = 0) {
   return isNaN(parsed) ? def : parsed;
 }
 
-// Helper: Safe Float Parsing
-function safeFloat(value, def = 0.0) {
-  if (!value) return def;
-  const cleaned = value.toString().trim().replace(/%/g, '');
-  const parsed = parseFloat(cleaned);
-  return isNaN(parsed) ? def : parsed;
-}
-
 // Helper: Parse View Counts (K, M, B)
 function parseViews(text) {
   if (!text) return 0;
