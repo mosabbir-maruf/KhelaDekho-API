@@ -122,3 +122,5 @@ worker/node_modules/
 worker/dist/
 .wrangler/
 .dev.vars
+node_modules/
+dist/
