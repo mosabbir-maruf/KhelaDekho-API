@@ -192,120 +192,150 @@ const verifySignature = async (c, next) => {
   await next();
 };
 
+// Browser-mimicking User-Agent rotation
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:133.0) Gecko/20100101 Firefox/133.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+];
+
+let uaIndex = 0;
+
+function nextUA() {
+  const ua = USER_AGENTS[uaIndex];
+  uaIndex = (uaIndex + 1) % USER_AGENTS.length;
+  return ua;
+}
+
+function buildScrapeHeaders() {
+  return {
+    'User-Agent': nextUA(),
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection': 'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest': 'document',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-Site': 'cross-site',
+    'Pragma': 'no-cache',
+    'Cache-Control': 'no-cache',
+  };
+}
+
 // Target Scraper Service
 async function scrapeAll(targetUrl) {
-  const res = await fetch(targetUrl, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (compatible; KhelaDekhoAggregator/1.0; CloudflareWorker)',
-      'Accept': 'text/html'
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(targetUrl, { headers: buildScrapeHeaders() });
+    if (!res.ok) {
+      if (attempt === 1) throw new Error(`Target provider returned status ${res.status}`);
+      continue;
     }
-  });
-  
-  if (!res.ok) throw new Error(`Target provider returned status ${res.status}`);
-  const html = await res.text();
-  const $ = cheerio.load(html);
-  
-  // 1. Matches Parsing
-  const matches = [];
-  const seenIds = new Set();
-  
-  $('.match-card[data-match-id], .match-card[data-match-status], div[data-match-id]').each((i, card) => {
-    const $card = $(card);
-    let matchId = $card.attr('data-match-id') || '';
-    
-    if (!matchId) {
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    // 1. Matches Parsing
+    const matches = [];
+    const seenIds = new Set();
+
+    $('.match-card[data-match-id], .match-card[data-match-status], div[data-match-id]').each((i, card) => {
+      const $card = $(card);
+      let matchId = $card.attr('data-match-id') || '';
+
+      if (!matchId) {
+        const rows = $card.find('.team-row');
+        if (rows.length >= 2) {
+          const t1 = cleanText($(rows[0]).find('.team-name, .mcard-team b, .mcard-team').text());
+          const t2 = cleanText($(rows[1]).find('.team-name, .mcard-team b, .mcard-team').text());
+          const startTs = $card.attr('data-start-ts') || $card.attr('data-start') || '0';
+          const t1Slug = t1.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+          const t2Slug = t2.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+          matchId = `${t1Slug}-vs-${t2Slug}-${startTs}`;
+        } else {
+          return;
+        }
+      }
+
+      if (seenIds.has(matchId)) return;
+      seenIds.add(matchId);
+
       const rows = $card.find('.team-row');
-      if (rows.length >= 2) {
-        const t1 = cleanText($(rows[0]).find('.team-name, .mcard-team b, .mcard-team').text());
-        const t2 = cleanText($(rows[1]).find('.team-name, .mcard-team b, .mcard-team').text());
-        const startTs = $card.attr('data-start-ts') || $card.attr('data-start') || '0';
-        const t1Slug = t1.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-        const t2Slug = t2.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-        matchId = `${t1Slug}-vs-${t2Slug}-${startTs}`;
-      } else {
-        return;
+      if (rows.length < 2) return;
+
+      const team1Name = cleanText($(rows[0]).find('.team-name, .mcard-team b, .mcard-team').text());
+      const team1Flag = $(rows[0]).find('img.flag, img.mcard-flag-img, .flag img, img[src*="flagcdn"]').attr('src') || null;
+      const team2Name = cleanText($(rows[1]).find('.team-name, .mcard-team b, .mcard-team').text());
+      const team2Flag = $(rows[1]).find('img.flag, img.mcard-flag-img, .flag img, img[src*="flagcdn"]').attr('src') || null;
+
+      const startTs = safeInt($card.attr('data-start-ts') || $card.attr('data-start'), 0);
+      const endTs = safeInt($card.attr('data-end-ts') || $card.attr('data-end'), 0);
+
+      let status = $card.attr('data-match-status') || $card.attr('data-status') || 'upcoming';
+      if (status === 'none' || !status) {
+        if ($card.find('[data-mode="live"], .live-dot.green').length > 0) status = 'live';
+        else if ($card.hasClass('live-row')) status = 'live';
+        else if ($card.hasClass('is-finished')) status = 'finished';
+      }
+
+      matches.push({
+        match_id: matchId,
+        group: cleanText($card.find('.match-group').text()),
+        stage: cleanText($card.find('[data-stage], .group-tag').text()) || 'Group Stage',
+        team1: { name: team1Name, flag_url: team1Flag },
+        team2: { name: team2Name, flag_url: team2Flag },
+        start_time: startTs ? new Date(startTs * 1000).toISOString() : null,
+        end_time: endTs ? new Date(endTs * 1000).toISOString() : null,
+        status: status
+      });
+    });
+
+    // 2. Channels Parsing
+    let channels = [];
+    const scriptRegex = /CHANNELS\s*=\s*(\[.+?\])\s*;/s;
+    const scriptMatch = html.match(scriptRegex);
+    if (scriptMatch) {
+      try {
+        const parsedData = JSON.parse(scriptMatch[1]);
+        channels = parsedData.map(item => ({
+          key: item.key || '',
+          name: item.name || '',
+          image_url: item.image || null,
+          category: item.category || 'Sports',
+          quality: item.quality || 'HD',
+          status: item.status || 'live',
+          sort_order: item.sort || 99,
+          total_views: item.views || 0,
+          live_viewers: item.live || 0,
+          resolution: item.resolution || 'Auto',
+          source_types: item.source_types || [],
+          play_token: item.play_token || null,
+          play_exp: item.play_exp || null,
+          fetched_at: new Date().toISOString()
+        })).filter(c => c.key);
+      } catch (e) {
+        console.warn("Failed to parse CHANNELS script array:", e);
       }
     }
-    
-    if (seenIds.has(matchId)) return;
-    seenIds.add(matchId);
-    
-    // Parse team info
-    const rows = $card.find('.team-row');
-    if (rows.length < 2) return;
-    
-    const team1Name = cleanText($(rows[0]).find('.team-name, .mcard-team b, .mcard-team').text());
-    const team1Flag = $(rows[0]).find('img.flag, img.mcard-flag-img, .flag img, img[src*="flagcdn"]').attr('src') || null;
-    const team2Name = cleanText($(rows[1]).find('.team-name, .mcard-team b, .mcard-team').text());
-    const team2Flag = $(rows[1]).find('img.flag, img.mcard-flag-img, .flag img, img[src*="flagcdn"]').attr('src') || null;
-    
-    const startTs = safeInt($card.attr('data-start-ts') || $card.attr('data-start'), 0);
-    const endTs = safeInt($card.attr('data-end-ts') || $card.attr('data-end'), 0);
-    
-    let status = $card.attr('data-match-status') || $card.attr('data-status') || 'upcoming';
-    if (status === 'none' || !status) {
-      if ($card.find('[data-mode="live"], .live-dot.green').length > 0) status = 'live';
-      else if ($card.hasClass('live-row')) status = 'live';
-      else if ($card.hasClass('is-finished')) status = 'finished';
-    }
-    
-    matches.push({
-      match_id: matchId,
-      group: cleanText($card.find('.match-group').text()),
-      stage: cleanText($card.find('[data-stage], .group-tag').text()) || 'Group Stage',
-      team1: { name: team1Name, flag_url: team1Flag },
-      team2: { name: team2Name, flag_url: team2Flag },
-      start_time: startTs ? new Date(startTs * 1000).toISOString() : null,
-      end_time: endTs ? new Date(endTs * 1000).toISOString() : null,
-      status: status
-    });
-  });
-  
-  // 2. Channels Parsing (Parse CHANNELS JS array block)
-  let channels = [];
-  const scriptRegex = /CHANNELS\s*=\s*(\[.+?\])\s*;/s;
-  const match = html.match(scriptRegex);
-  if (match) {
-    try {
-      const parsedData = JSON.parse(match[1]);
-      channels = parsedData.map(item => ({
-        key: item.key || '',
-        name: item.name || '',
-        image_url: item.image || null,
-        category: item.category || 'Sports',
-        quality: item.quality || 'HD',
-        status: item.status || 'live',
-        sort_order: item.sort || 99,
-        total_views: item.views || 0,
-        live_viewers: item.live || 0,
-        resolution: item.resolution || 'Auto',
-        source_types: item.source_types || [],
-        play_token: item.play_token || null,
-        play_exp: item.play_exp || null,
+
+    // 3. Platform Stats
+    const liveViewers = safeInt($('[data-stats-live], #currentLiveCount, .watch-metric.live strong').text());
+    const allViews = parseViews($('[data-stats-views], #currentViewCount, .watch-metric strong').text());
+    const totalChannels = channels.length;
+
+    return {
+      matches,
+      channels,
+      platform_stats: {
+        live_viewers: liveViewers,
+        all_views: allViews,
+        active_channels: totalChannels,
+        total_channels: totalChannels,
         fetched_at: new Date().toISOString()
-      })).filter(c => c.key);
-    } catch (e) {
-      console.warn("Failed to parse CHANNELS script array:", e);
-    }
-  }
-  
-  // 3. Platform Stats
-  let liveViewers = safeInt($('[data-stats-live], #currentLiveCount, .watch-metric.live strong').text());
-  let allViews = parseViews($('[data-stats-views], #currentViewCount, .watch-metric strong').text());
-  let totalChannels = channels.length;
-  
-  return {
-    matches,
-    channels,
-    platform_stats: {
-      live_viewers: liveViewers,
-      all_views: allViews,
-      active_channels: totalChannels,
-      total_channels: totalChannels,
+      },
       fetched_at: new Date().toISOString()
-    },
-    fetched_at: new Date().toISOString()
-  };
+    };
+  }
 }
 
 // Global lock to prevent cache stampedes

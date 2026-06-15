@@ -7,8 +7,8 @@ BDT = timezone(timedelta(hours=6))
 class Settings(BaseSettings):
     target_url: str = ""
     user_agent: str = (
-        "Mozilla/5.0 (compatible; KhelaDekhoAggregator/1.0; "
-        "+https://github.com/mosabbir-maruf/kheladekho)"
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/605.1.15 "
+        "(KHTML, like Gecko) Version/18.2 Safari/605.1.15"
     )
     request_timeout: float = 30.0
     scrape_interval_seconds: int = 60
