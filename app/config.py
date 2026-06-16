@@ -6,6 +6,8 @@ BDT = timezone(timedelta(hours=6))
 
 class Settings(BaseSettings):
     target_url: str = ""
+    sportzfy_target_url: str = "https://sportzfytvlive.xyz"
+    sportzfy_playback_key: str = "ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8"
     user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/605.1.15 "
         "(KHTML, like Gecko) Version/18.2 Safari/605.1.15"

@@ -675,3 +675,535 @@ app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), v
 });
 
 export default app;
+
+// =========================================================================
+// V2 Optimized Helpers & Routes
+// =========================================================================
+
+// --- Shared Constants ---
+const SPORTZFY_PLAYBACK_KEY = 'ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8';
+const SPORTZFY_TARGET_URL = 'https://sportzfytvlive.xyz';
+const KICKBD_HOME = 'https://kickbd.com';
+
+// --- Concurrent Batch Processor ---
+async function concurrentMap(items, fn, concurrency = 5) {
+  const results = [];
+  const queue = [...items];
+  async function worker() {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      results.push(await fn(item));
+    }
+  }
+  const count = Math.min(concurrency, items.length);
+  if (count === 0) return results;
+  await Promise.all(Array.from({ length: count }, () => worker()));
+  return results;
+}
+
+// --- Unified Cache helper with stampede protection ---
+const fetchPromises = new Map();
+async function getCachedOrFetch(c, key, fetchFn, ttl) {
+  const cache = caches.default;
+  const cacheReq = new Request(`http://kheladekho-cache.internal/v2/${key}`);
+  const hit = await cache.match(cacheReq);
+  if (hit) return await hit.json();
+
+  if (fetchPromises.has(key)) return await fetchPromises.get(key);
+
+  const promise = fetchFn()
+    .then(data => {
+      const res = new Response(JSON.stringify(data), {
+        headers: { 'Content-Type': 'application/json', 'Cache-Control': `max-age=${ttl}` }
+      });
+      c.executionCtx.waitUntil(cache.put(cacheReq, res));
+      return data;
+    })
+    .finally(() => fetchPromises.delete(key));
+
+  fetchPromises.set(key, promise);
+  return await promise;
+}
+
+// --- Status computation (extracted, no redefinition each call) ---
+function computeEventStatus(startsAt, now) {
+  if (!startsAt) return 'upcoming';
+  const ts = Math.floor(new Date(startsAt).getTime() / 1000);
+  if (ts <= now + 300 && ts > now - 3600) return 'live';
+  if (ts > now + 300 && ts <= now + 64800) return 'upcoming';
+  if (ts < now - 3600) return 'finished';
+  return 'upcoming';
+}
+
+// --- AES-GCM Decryption (Sportzfy playback) ---
+async function sportzfyDecrypt(encStr, bucket, playbackKey) {
+  const encoder = new TextEncoder();
+  const keyHash = await crypto.subtle.digest('SHA-256', encoder.encode(`${playbackKey}|lsp-v1|${bucket}`));
+  const cryptoKey = await crypto.subtle.importKey('raw', keyHash, { name: 'AES-GCM' }, false, ['decrypt']);
+  const raw = Uint8Array.from(atob(encStr), c => c.charCodeAt(0));
+  const plain = await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv: raw.slice(0, 12), tagLength: 128 },
+    cryptoKey,
+    raw.slice(12)
+  );
+  return JSON.parse(new TextDecoder().decode(plain));
+}
+
+// --- Kickbd XOR decryption ---
+function kickbdDecrypt(payloadUrlEnc) {
+  const decoded = decodeURIComponent(payloadUrlEnc);
+  const k = "999999859198";
+  let r = "";
+  for (let i = 0; i < decoded.length; i++) {
+    r += String.fromCharCode((decoded.charCodeAt(i) + 5) ^ k.charCodeAt(i % k.length));
+  }
+  return r;
+}
+
+// --- Unified fetch helper (no duplicate UA strings) ---
+async function fetchText(url, headers = {}) {
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': nextUA(),
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      'Accept-Language': 'en-US,en;q=0.9',
+      ...headers
+    }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.text();
+}
+
+// =========================================================================
+// Sportzfy Helpers
+// =========================================================================
+
+async function fetchSportzfyEvents(targetUrl) {
+  const base = targetUrl.replace(/\/+$/, '');
+  const json = await fetchText(`${base}/api/upstream/events`, { 'Accept': 'application/json' });
+  const rawEvents = JSON.parse(json).events || [];
+  const now = Math.floor(Date.now() / 1000);
+
+  return rawEvents.filter(e => e && e.id).map(e => {
+    const startsAt = e.starts_at ? e.starts_at.replace('Z', '+00:00') : null;
+    const status = computeEventStatus(startsAt, now);
+    return {
+      id: e.id,
+      parent: e.parent || e.id,
+      enc_parent: e.enc_parent || e.parent || e.id,
+      sport: e.sport || 'Sports',
+      league: e.league || '',
+      round: e.round || '',
+      team_a: { name: e.team_a_name || 'Team A', logo: e.team_a_logo || null },
+      team_b: { name: e.team_b_name || 'Team B', logo: e.team_b_logo || null },
+      starts_at: startsAt,
+      is_live: status === 'live' || Boolean(e.is_live),
+      status,
+      league_icon: e.league_icon || null,
+      priority: e.priority || 0,
+      fetched_at: new Date().toISOString()
+    };
+  });
+}
+
+async function fetchSportzfyPlayback(parent, targetUrl) {
+  const base = targetUrl.replace(/\/+$/, '');
+  let body;
+  try {
+    body = JSON.parse(await fetchText(`${base}/api/upstream/playback/${parent}`, {
+      'Accept': 'application/json',
+      'X-Requested-With': 'lsp'
+    }));
+  } catch (e) {
+    return { ok: false, parent, streams: [] };
+  }
+
+  if (body && body.enc) {
+    try {
+      body = await sportzfyDecrypt(body.enc, body.bucket || 0, SPORTZFY_PLAYBACK_KEY);
+    } catch (e) {
+      return { ok: false, parent, streams: [] };
+    }
+  }
+
+  const ok = body && body.ok;
+  const rawStreams = body && body.streams ? body.streams : [];
+
+  // Parallel stream verification
+  const verifyHeaders = {
+    'User-Agent': nextUA(),
+    'Accept': '*/*',
+    'Referer': `${base}/`
+  };
+
+  const streamChecks = rawStreams.map(async (s, i) => {
+    const streamUrl = s.stream_url || '';
+    if (!streamUrl) return null;
+    const drmKid = s.drm_kid || null;
+    const drmKey = s.drm_key || null;
+    const hasDrm = !!(drmKid && drmKey);
+    const isDrmDash = hasDrm && s.stream_type === 'dash';
+    let alive = false;
+    try {
+      const resp = await fetch(streamUrl, { headers: verifyHeaders, redirect: 'follow' });
+      alive = resp.ok || (isDrmDash && resp.status === 403);
+    } catch (e) { /* not alive */ }
+    if (!alive) return null;
+    return {
+      id: s.id || String(i),
+      label: s.label || `Server ${i + 1}`,
+      stream_type: s.stream_type || 'hls',
+      stream_url: streamUrl,
+      drm_kid: drmKid,
+      drm_key: drmKey,
+      sort_order: s.sort_order !== undefined ? s.sort_order : i
+    };
+  });
+
+  const streams = (await Promise.all(streamChecks))
+    .filter(Boolean)
+    .sort((a, b) => a.sort_order - b.sort_order);
+
+  return { ok: ok && streams.length > 0, parent, streams };
+}
+
+// =========================================================================
+// Kickbd Helpers
+// =========================================================================
+
+async function processChannel(ch) {
+  let iframeUrl = null;
+  try {
+    const watchHtml = await fetchText(`${KICKBD_HOME}/watch/${ch.id}`);
+    const iframeMatch = watchHtml.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/);
+    if (iframeMatch) iframeUrl = iframeMatch[1];
+  } catch (e) { /* skip */ }
+
+  let streamData = null;
+  if (iframeUrl) {
+    if (iframeUrl.includes('kickbd.com/source/')) {
+      try {
+        const srcHtml = await fetchText(iframeUrl);
+        const pMatch = srcHtml.match(/var _p\s*=\s*"([^"]+)"/);
+        if (pMatch) {
+          const decrypted = kickbdDecrypt(pMatch[1]);
+          const urlMatch = decrypted.match(/window\.player\.load\('([^']+)'\)/);
+          const kidMatch = decrypted.match(/k_id='([^']+)'/);
+          const kvMatch = decrypted.match(/k_v='([^']+)'/);
+          if (urlMatch) {
+            streamData = {
+              stream_url: urlMatch[1],
+              stream_type: urlMatch[1].includes('.mpd') ? 'dash' : 'hls',
+              drm_kid: kidMatch ? kidMatch[1] : null,
+              drm_key: kvMatch ? kvMatch[1] : null
+            };
+          }
+        }
+      } catch (e) { /* skip */ }
+    } else if (iframeUrl.includes('kick.yagaverse.net')) {
+      try {
+        const yHtml = await fetchText(iframeUrl);
+        const sMatch = yHtml.match(/const streamUrl\s*=\s*'([^']+)'/);
+        if (sMatch) {
+          streamData = { stream_url: sMatch[1], stream_type: 'hls' };
+        }
+      } catch (e) { /* skip */ }
+    } else if (iframeUrl.includes('soccerball.st')) {
+      try {
+        const sHtml = await fetchText(iframeUrl);
+        const proxyMatch = sHtml.match(/https?:\/\/[^"'<>\s]+s\d+\.php[^"'<>\s]*/);
+        if (proxyMatch) {
+          const proxyHtml = await fetchText(proxyMatch[0]);
+          const m3u8s = proxyHtml.match(/https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*/g);
+          if (m3u8s) streamData = { stream_url: m3u8s[0], stream_type: 'hls' };
+        }
+      } catch (e) { /* skip */ }
+    } else {
+      // Generic handler for all other iframe types (also covers kickbd.com/player/)
+      try {
+        const pHtml = await fetchText(iframeUrl);
+        const urlMatch = pHtml.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
+        if (urlMatch) {
+          streamData = {
+            stream_url: urlMatch[0],
+            stream_type: urlMatch[0].includes('.mpd') ? 'dash' : 'hls'
+          };
+        }
+      } catch (e) { /* skip */ }
+    }
+  }
+
+  let alive = false;
+  if (streamData && streamData.stream_url) {
+    try {
+      const resp = await fetch(streamData.stream_url, {
+        headers: {
+          'User-Agent': nextUA(),
+          'Referer': 'https://kickbd.com/',
+          'Origin': 'https://kickbd.com'
+        },
+        redirect: 'follow'
+      });
+      alive = resp.ok || (streamData.drm_kid && streamData.stream_type === 'dash' && resp.status === 403);
+    } catch (e) { /* not alive */ }
+  }
+
+  return {
+    id: ch.id,
+    name: ch.name,
+    logo: ch.logo,
+    stream_type: streamData ? streamData.stream_type : 'hls',
+    stream_url: alive && streamData ? streamData.stream_url : null,
+    drm_kid: alive && streamData ? (streamData.drm_kid || null) : null,
+    drm_key: alive && streamData ? (streamData.drm_key || null) : null,
+    is_alive: alive,
+    cached_at: new Date().toISOString()
+  };
+}
+
+async function fetchKickbdChannels() {
+  const html = await fetchText(KICKBD_HOME);
+  const seen = new Set();
+  const channelRegex = /href=["']https:\/\/kickbd\.com\/watch\/(\d+)["'][^>]*>.*?<img[^>]*src=["']([^"']+)["'][^>]*alt=["']([^"']+)["']/gs;
+  const channels = [];
+  let m;
+  while ((m = channelRegex.exec(html)) !== null) {
+    const id = parseInt(m[1], 10);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    channels.push({ id, name: m[3].trim(), logo: m[2] });
+  }
+
+  // Parallel processing with concurrency=5
+  return await concurrentMap(channels, processChannel, 5);
+}
+
+async function processHighlight(slug) {
+  let detail = { slug, title: slug, stream_url: null, sources: [], is_alive: false };
+  try {
+    const detailHtml = await fetchText(`${KICKBD_HOME}/highlights/${slug}`);
+    const titleMatch = detailHtml.match(/<title[^>]*>(.*?)<\/title>/);
+    if (titleMatch) detail.title = titleMatch[1].replace(' || KicKBD.Com', '').trim();
+    const iframeMatch = detailHtml.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/);
+    if (iframeMatch) {
+      const streamUrl = iframeMatch[1];
+      if (streamUrl.includes('cdn.kickbd.com/stream.php')) {
+        try {
+          const innerHtml = await fetchText(streamUrl);
+          const payloadMatch = innerHtml.match(/securePayload\s*=\s*"([^"]+)"/);
+          if (payloadMatch) {
+            const decodedUrl = atob(payloadMatch[1]);
+            const playerHtml = await fetchText(decodedUrl);
+            const sourcesRaw = [...playerHtml.matchAll(/\{"label":"([^"]+)","type":"[^"]+","file":"([^"]+)"[^}]*\}/g)];
+            if (sourcesRaw.length > 0) {
+              detail.sources = sourcesRaw.map(sr => ({ label: sr[1], url: sr[2] }));
+              detail.stream_url = sourcesRaw[0][2];
+              detail.is_alive = true;
+            }
+          }
+        } catch (e) { /* expired or unavailable */ }
+      } else {
+        detail.stream_url = streamUrl;
+        detail.is_alive = true;
+      }
+    }
+  } catch (e) { /* skip */ }
+  return detail;
+}
+
+async function fetchKickbdHighlights() {
+  const html = await fetchText(KICKBD_HOME);
+  const slugSet = new Set();
+  const slugRegex = /href=["']https:\/\/kickbd\.com\/highlights\/([^"']+)["'][^>]*>/g;
+  let m;
+  while ((m = slugRegex.exec(html)) !== null) slugSet.add(m[1]);
+
+  // Parallel processing with concurrency=5
+  return await concurrentMap([...slugSet], processHighlight, 5);
+}
+
+// =========================================================================
+// V2 Routes
+// =========================================================================
+
+app.get('/api/v2/health', rateLimiterMiddleware(100, 60), (c) => {
+  return c.json(makeResponse(true, {
+    status: 'ok', version: '2.0.0', source: 'sportzfytvlive.xyz'
+  }));
+});
+
+// --- Sportzfy Events ---
+app.get('/api/v2/events', rateLimiterMiddleware(100, 60), async (c) => {
+  const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
+  const events = await getCachedOrFetch(c, 'sportzfy_events',
+    () => fetchSportzfyEvents(targetUrl), 120);
+  const sport = c.req.query('sport');
+  const league = c.req.query('league');
+  const statusFilter = c.req.query('status');
+  const q = c.req.query('q');
+  const limit = Math.min(safeInt(c.req.query('limit'), 50), 100);
+  const offset = safeInt(c.req.query('offset'), 0);
+
+  let filtered = events;
+  if (sport) { const s = sport.toLowerCase(); filtered = filtered.filter(e => e.sport.toLowerCase() === s); }
+  if (league) { const l = league.toLowerCase(); filtered = filtered.filter(e => e.league.toLowerCase().includes(l)); }
+  if (statusFilter) filtered = filtered.filter(e => e.status === statusFilter);
+  if (q) {
+    const query = q.toLowerCase();
+    filtered = filtered.filter(e =>
+      e.team_a.name.toLowerCase().includes(query) ||
+      e.team_b.name.toLowerCase().includes(query) ||
+      e.league.toLowerCase().includes(query) ||
+      e.sport.toLowerCase().includes(query)
+    );
+  }
+
+  filtered.sort((a, b) => a.priority - b.priority || new Date(a.starts_at || '9999-12-31') - new Date(b.starts_at || '9999-12-31'));
+  const total = filtered.length;
+  const page = filtered.slice(offset, offset + limit);
+  return c.json(makeResponse(true, { events: page, total, cached_at: new Date().toISOString() }));
+});
+
+app.get('/api/v2/events/live', rateLimiterMiddleware(100, 60), async (c) => {
+  const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
+  const events = await getCachedOrFetch(c, 'sportzfy_events',
+    () => fetchSportzfyEvents(targetUrl), 120);
+  const live = events.filter(e => e.status === 'live').sort((a, b) => a.priority - b.priority);
+  return c.json(makeResponse(true, { events: live, total: live.length, cached_at: new Date().toISOString() }));
+});
+
+app.get('/api/v2/events/upcoming', rateLimiterMiddleware(100, 60), async (c) => {
+  const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
+  const events = await getCachedOrFetch(c, 'sportzfy_events',
+    () => fetchSportzfyEvents(targetUrl), 120);
+  const upcoming = events.filter(e => e.status === 'upcoming').sort((a, b) => a.priority - b.priority);
+  return c.json(makeResponse(true, { events: upcoming, total: upcoming.length, cached_at: new Date().toISOString() }));
+});
+
+app.get('/api/v2/events/:event_id', rateLimiterMiddleware(100, 60), async (c) => {
+  const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
+  const events = await getCachedOrFetch(c, 'sportzfy_events',
+    () => fetchSportzfyEvents(targetUrl), 120);
+  const eventId = c.req.param('event_id');
+  const event = events.find(e => e.id === eventId || e.enc_parent === eventId || e.parent === eventId);
+  if (!event) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Event not found' }), 404);
+  return c.json(makeResponse(true, event));
+});
+
+// --- Sportzfy Playback ---
+app.get('/api/v2/events/:event_id/playback', rateLimiterMiddleware(100, 60), async (c) => {
+  const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
+  const events = await getCachedOrFetch(c, 'sportzfy_events',
+    () => fetchSportzfyEvents(targetUrl), 120);
+  const eventId = c.req.param('event_id');
+  const event = events.find(e => e.id === eventId || e.enc_parent === eventId || e.parent === eventId);
+  if (!event) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Event not found' }), 404);
+  if (!event.parent) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'Event has no playback identifier' }), 400);
+
+  const parent = event.parent;
+  const playback = await getCachedOrFetch(c, `sportzfy_playback_${parent}`,
+    () => fetchSportzfyPlayback(parent, targetUrl), 15);
+  if (!playback.ok || !playback.streams || playback.streams.length === 0) {
+    return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'No streams available' }), 502);
+  }
+  return c.json(makeResponse(true, playback));
+});
+
+// --- Sportzfy Sports ---
+app.get('/api/v2/sports', rateLimiterMiddleware(100, 60), async (c) => {
+  const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
+  const events = await getCachedOrFetch(c, 'sportzfy_events',
+    () => fetchSportzfyEvents(targetUrl), 120);
+  const counts = {};
+  events.forEach(e => { const s = e.sport || 'Unknown'; counts[s] = (counts[s] || 0) + 1; });
+  const sports = Object.entries(counts).map(([name, event_count]) => ({ name, event_count }))
+    .sort((a, b) => b.event_count - a.event_count);
+  return c.json(makeResponse(true, { sports }));
+});
+
+// --- Sportzfy Leagues ---
+app.get('/api/v2/leagues', rateLimiterMiddleware(100, 60), async (c) => {
+  const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
+  const events = await getCachedOrFetch(c, 'sportzfy_events',
+    () => fetchSportzfyEvents(targetUrl), 120);
+  const counts = {};
+  events.forEach(e => { const l = e.league || 'Unknown'; counts[l] = (counts[l] || 0) + 1; });
+  const leagues = Object.entries(counts).map(([name, event_count]) => ({ name, event_count }))
+    .sort((a, b) => b.event_count - a.event_count);
+  return c.json(makeResponse(true, { leagues }));
+});
+
+// --- Sportzfy Stats ---
+app.get('/api/v2/stats', rateLimiterMiddleware(100, 60), async (c) => {
+  const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
+  const events = await getCachedOrFetch(c, 'sportzfy_events',
+    () => fetchSportzfyEvents(targetUrl), 120);
+  return c.json(makeResponse(true, {
+    total_events: events.length,
+    live_events: events.filter(e => e.status === 'live').length,
+    upcoming_events: events.filter(e => e.status === 'upcoming').length,
+    sports_count: [...new Set(events.map(e => e.sport))].length,
+    leagues_count: [...new Set(events.map(e => e.league))].length,
+    cached_at: new Date().toISOString()
+  }));
+});
+
+// --- Kickbd Channels ---
+app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
+  const channels = await getCachedOrFetch(c, 'kickbd_channels',
+    () => fetchKickbdChannels(), 120);
+  const q = c.req.query('q');
+  const aliveOnly = c.req.query('alive') === 'true';
+  let filtered = channels;
+  if (aliveOnly) filtered = filtered.filter(ch => ch.is_alive);
+  if (q) { const query = q.toLowerCase(); filtered = filtered.filter(ch => ch.name.toLowerCase().includes(query)); }
+  return c.json(makeResponse(true, { channels: filtered, total: filtered.length, cached_at: new Date().toISOString() }));
+});
+
+app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c) => {
+  const channels = await getCachedOrFetch(c, 'kickbd_channels',
+    () => fetchKickbdChannels(), 120);
+  const channelId = parseInt(c.req.param('channel_id'), 10);
+  const channel = channels.find(ch => ch.id === channelId);
+  if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
+  return c.json(makeResponse(true, channel));
+});
+
+// --- Kickbd Highlights ---
+app.get('/api/v2/highlights', rateLimiterMiddleware(100, 60), async (c) => {
+  const highlights = await getCachedOrFetch(c, 'kickbd_highlights',
+    () => fetchKickbdHighlights(), 120);
+  return c.json(makeResponse(true, { highlights, total: highlights.length, cached_at: new Date().toISOString() }));
+});
+
+app.get('/api/v2/highlights/:slug', rateLimiterMiddleware(100, 60), async (c) => {
+  const highlights = await getCachedOrFetch(c, 'kickbd_highlights',
+    () => fetchKickbdHighlights(), 120);
+  const slug = c.req.param('slug');
+  const highlight = highlights.find(h => h.slug === slug);
+  if (!highlight) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Highlight not found' }), 404);
+  return c.json(makeResponse(true, highlight));
+});
+
+// --- Proxy ---
+app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
+  const url = c.req.query('url');
+  if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
+  try {
+    const resp = await fetch(url, {
+      headers: { 'User-Agent': nextUA(), 'Accept': '*/*', 'Accept-Language': 'en-US,en;q=0.9' },
+      redirect: 'follow'
+    });
+    const body = await resp.arrayBuffer();
+    return new Response(body, {
+      status: resp.status,
+      headers: {
+        'Content-Type': resp.headers.get('content-type') || 'application/octet-stream',
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=30'
+      }
+    });
+  } catch (e) {
+    return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Failed to fetch stream' }), 502);
+  }
+});
