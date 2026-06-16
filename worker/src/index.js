@@ -963,19 +963,24 @@ async function processChannel(ch) {
 
 async function fetchKickbdChannels() {
   const html = await fetchText(KICKBD_HOME);
+  const $ = cheerio.load(html);
   const seen = new Set();
-  const channelRegex = /href=["']https:\/\/kickbd\.com\/watch\/(\d+)["'][^>]*>.*?<img[^>]*src=["']([^"']+)["'][^>]*alt=["']([^"']+)["']/gs;
   const channels = [];
-  let m;
-  while ((m = channelRegex.exec(html)) !== null) {
-    const id = parseInt(m[1], 10);
-    if (seen.has(id)) continue;
+  $('a[href*="/watch/"]').each((i, el) => {
+    const href = $(el).attr('href') || '';
+    const match = href.match(/\/watch\/(\d+)/);
+    if (!match) return;
+    const id = parseInt(match[1], 10);
+    if (seen.has(id)) return;
     seen.add(id);
-    channels.push({ id, name: m[3].trim(), logo: m[2] });
-  }
+    const img = $(el).find('img');
+    const name = img.attr('alt') || $(el).text().trim() || 'Channel ' + id;
+    const logo = img.attr('src') || null;
+    channels.push({ id, name, logo });
+  });
 
-  // Parallel processing with concurrency=5
-  return await concurrentMap(channels, processChannel, 5);
+  // Parallel processing with concurrency=3 to avoid rate limiting
+  return await concurrentMap(channels, processChannel, 3);
 }
 
 async function processHighlight(slug) {
