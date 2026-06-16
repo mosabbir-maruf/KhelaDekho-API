@@ -1211,7 +1211,7 @@ app.get('/api/v2/highlights/:slug', rateLimiterMiddleware(100, 60), async (c) =>
   return c.json(makeResponse(true, highlight));
 });
 
-// --- Proxy ---
+// --- Proxy (rewrites m3u8 URLs to bypass CORS) ---
 app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
   const url = c.req.query('url');
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
@@ -1220,7 +1220,32 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
       headers: { 'User-Agent': nextUA(), 'Accept': '*/*', 'Accept-Language': 'en-US,en;q=0.9' },
       redirect: 'follow'
     });
-    const body = await resp.arrayBuffer();
+    let body = await resp.arrayBuffer();
+    const contentType = resp.headers.get('content-type') || '';
+
+    if (body.byteLength > 10) {
+      const head = new TextDecoder().decode(body.slice(0, 20));
+      if (head.startsWith('#EXTM3U')) {
+        const reqUrl = new URL(c.req.url);
+        const proxyBase = `${reqUrl.origin}/api/v2/proxy?url=`;
+        const text = new TextDecoder().decode(body);
+        const baseUrl = new URL(url);
+        const baseDir = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
+        const lines = text.split('\n');
+        const rewritten = lines.map(line => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) return line;
+          try {
+            const resolved = trimmed.startsWith('http')
+              ? trimmed
+              : new URL(trimmed, baseUrl.origin + baseDir).href;
+            return proxyBase + encodeURIComponent(resolved);
+          } catch { return line; }
+        }).join('\n');
+        body = new TextEncoder().encode(rewritten).buffer;
+      }
+    }
+
     return new Response(body, {
       status: resp.status,
       headers: {
