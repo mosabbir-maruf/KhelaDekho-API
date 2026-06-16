@@ -10,7 +10,7 @@
     "hono": "^4.0.0"
   },
   "devDependencies": {
-    "wrangler": "^4.100.0"
+    "wrangler": "^4.101.0"
   },
   "overrides": {
     "esbuild": ">=0.28.1"
