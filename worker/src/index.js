@@ -707,14 +707,46 @@ async function getCachedOrFetch(c, key, fetchFn, ttl) {
   const cache = caches.default;
   const cacheReq = new Request(`http://kheladekho-cache.internal/v2/${key}`);
   const hit = await cache.match(cacheReq);
-  if (hit) return await hit.json();
+
+  // Serve any cached response immediately (fresh or stale)
+  if (hit) {
+    // Check if still fresh
+    const dateHeader = hit.headers.get('x-cache-date');
+    const cachedAt = dateHeader ? parseInt(dateHeader, 10) : 0;
+    const age = Date.now() - cachedAt;
+    if (age < ttl * 1000) return await hit.json(); // Fresh
+
+    // Stale: serve immediately, re-fetch in background
+    c.executionCtx.waitUntil(
+      (async () => {
+        if (fetchPromises.has(key)) return;
+        const p = fetchFn().then(data => {
+          const res = new Response(JSON.stringify(data), {
+            headers: {
+              'Content-Type': 'application/json',
+              'Cache-Control': `max-age=${ttl}`,
+              'x-cache-date': String(Date.now())
+            }
+          });
+          return cache.put(cacheReq, res);
+        }).finally(() => fetchPromises.delete(key));
+        fetchPromises.set(key, p);
+        await p;
+      })()
+    );
+    return await hit.json();
+  }
 
   if (fetchPromises.has(key)) return await fetchPromises.get(key);
 
   const promise = fetchFn()
     .then(data => {
       const res = new Response(JSON.stringify(data), {
-        headers: { 'Content-Type': 'application/json', 'Cache-Control': `max-age=${ttl}` }
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': `max-age=${ttl}`,
+          'x-cache-date': String(Date.now())
+        }
       });
       c.executionCtx.waitUntil(cache.put(cacheReq, res));
       return data;
@@ -1030,7 +1062,7 @@ app.get('/api/v2/health', rateLimiterMiddleware(100, 60), (c) => {
 app.get('/api/v2/events', rateLimiterMiddleware(100, 60), async (c) => {
   const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
   const events = await getCachedOrFetch(c, 'sportzfy_events',
-    () => fetchSportzfyEvents(targetUrl), 120);
+    () => fetchSportzfyEvents(targetUrl), 600);
   const sport = c.req.query('sport');
   const league = c.req.query('league');
   const statusFilter = c.req.query('status');
@@ -1061,7 +1093,7 @@ app.get('/api/v2/events', rateLimiterMiddleware(100, 60), async (c) => {
 app.get('/api/v2/events/live', rateLimiterMiddleware(100, 60), async (c) => {
   const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
   const events = await getCachedOrFetch(c, 'sportzfy_events',
-    () => fetchSportzfyEvents(targetUrl), 120);
+    () => fetchSportzfyEvents(targetUrl), 600);
   const live = events.filter(e => e.status === 'live').sort((a, b) => a.priority - b.priority);
   return c.json(makeResponse(true, { events: live, total: live.length, cached_at: new Date().toISOString() }));
 });
@@ -1069,7 +1101,7 @@ app.get('/api/v2/events/live', rateLimiterMiddleware(100, 60), async (c) => {
 app.get('/api/v2/events/upcoming', rateLimiterMiddleware(100, 60), async (c) => {
   const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
   const events = await getCachedOrFetch(c, 'sportzfy_events',
-    () => fetchSportzfyEvents(targetUrl), 120);
+    () => fetchSportzfyEvents(targetUrl), 600);
   const upcoming = events.filter(e => e.status === 'upcoming').sort((a, b) => a.priority - b.priority);
   return c.json(makeResponse(true, { events: upcoming, total: upcoming.length, cached_at: new Date().toISOString() }));
 });
@@ -1077,7 +1109,7 @@ app.get('/api/v2/events/upcoming', rateLimiterMiddleware(100, 60), async (c) => 
 app.get('/api/v2/events/:event_id', rateLimiterMiddleware(100, 60), async (c) => {
   const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
   const events = await getCachedOrFetch(c, 'sportzfy_events',
-    () => fetchSportzfyEvents(targetUrl), 120);
+    () => fetchSportzfyEvents(targetUrl), 600);
   const eventId = c.req.param('event_id');
   const event = events.find(e => e.id === eventId || e.enc_parent === eventId || e.parent === eventId);
   if (!event) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Event not found' }), 404);
@@ -1088,7 +1120,7 @@ app.get('/api/v2/events/:event_id', rateLimiterMiddleware(100, 60), async (c) =>
 app.get('/api/v2/events/:event_id/playback', rateLimiterMiddleware(100, 60), async (c) => {
   const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
   const events = await getCachedOrFetch(c, 'sportzfy_events',
-    () => fetchSportzfyEvents(targetUrl), 120);
+    () => fetchSportzfyEvents(targetUrl), 600);
   const eventId = c.req.param('event_id');
   const event = events.find(e => e.id === eventId || e.enc_parent === eventId || e.parent === eventId);
   if (!event) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Event not found' }), 404);
@@ -1096,7 +1128,7 @@ app.get('/api/v2/events/:event_id/playback', rateLimiterMiddleware(100, 60), asy
 
   const parent = event.parent;
   const playback = await getCachedOrFetch(c, `sportzfy_playback_${parent}`,
-    () => fetchSportzfyPlayback(parent, targetUrl), 15);
+    () => fetchSportzfyPlayback(parent, targetUrl), 120);
   if (!playback.ok || !playback.streams || playback.streams.length === 0) {
     return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'No streams available' }), 502);
   }
@@ -1107,7 +1139,7 @@ app.get('/api/v2/events/:event_id/playback', rateLimiterMiddleware(100, 60), asy
 app.get('/api/v2/sports', rateLimiterMiddleware(100, 60), async (c) => {
   const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
   const events = await getCachedOrFetch(c, 'sportzfy_events',
-    () => fetchSportzfyEvents(targetUrl), 120);
+    () => fetchSportzfyEvents(targetUrl), 600);
   const counts = {};
   events.forEach(e => { const s = e.sport || 'Unknown'; counts[s] = (counts[s] || 0) + 1; });
   const sports = Object.entries(counts).map(([name, event_count]) => ({ name, event_count }))
@@ -1119,7 +1151,7 @@ app.get('/api/v2/sports', rateLimiterMiddleware(100, 60), async (c) => {
 app.get('/api/v2/leagues', rateLimiterMiddleware(100, 60), async (c) => {
   const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
   const events = await getCachedOrFetch(c, 'sportzfy_events',
-    () => fetchSportzfyEvents(targetUrl), 120);
+    () => fetchSportzfyEvents(targetUrl), 600);
   const counts = {};
   events.forEach(e => { const l = e.league || 'Unknown'; counts[l] = (counts[l] || 0) + 1; });
   const leagues = Object.entries(counts).map(([name, event_count]) => ({ name, event_count }))
@@ -1131,7 +1163,7 @@ app.get('/api/v2/leagues', rateLimiterMiddleware(100, 60), async (c) => {
 app.get('/api/v2/stats', rateLimiterMiddleware(100, 60), async (c) => {
   const targetUrl = c.env.SPORTZFY_TARGET_URL || SPORTZFY_TARGET_URL;
   const events = await getCachedOrFetch(c, 'sportzfy_events',
-    () => fetchSportzfyEvents(targetUrl), 120);
+    () => fetchSportzfyEvents(targetUrl), 600);
   return c.json(makeResponse(true, {
     total_events: events.length,
     live_events: events.filter(e => e.status === 'live').length,
@@ -1145,7 +1177,7 @@ app.get('/api/v2/stats', rateLimiterMiddleware(100, 60), async (c) => {
 // --- Kickbd Channels ---
 app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
   const channels = await getCachedOrFetch(c, 'kickbd_channels',
-    () => fetchKickbdChannels(), 120);
+    () => fetchKickbdChannels(), 1800);
   const q = c.req.query('q');
   const aliveOnly = c.req.query('alive') === 'true';
   let filtered = channels;
@@ -1156,7 +1188,7 @@ app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
 
 app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c) => {
   const channels = await getCachedOrFetch(c, 'kickbd_channels',
-    () => fetchKickbdChannels(), 120);
+    () => fetchKickbdChannels(), 1800);
   const channelId = parseInt(c.req.param('channel_id'), 10);
   const channel = channels.find(ch => ch.id === channelId);
   if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
@@ -1166,13 +1198,13 @@ app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c
 // --- Kickbd Highlights ---
 app.get('/api/v2/highlights', rateLimiterMiddleware(100, 60), async (c) => {
   const highlights = await getCachedOrFetch(c, 'kickbd_highlights',
-    () => fetchKickbdHighlights(), 120);
+    () => fetchKickbdHighlights(), 1800);
   return c.json(makeResponse(true, { highlights, total: highlights.length, cached_at: new Date().toISOString() }));
 });
 
 app.get('/api/v2/highlights/:slug', rateLimiterMiddleware(100, 60), async (c) => {
   const highlights = await getCachedOrFetch(c, 'kickbd_highlights',
-    () => fetchKickbdHighlights(), 120);
+    () => fetchKickbdHighlights(), 1800);
   const slug = c.req.param('slug');
   const highlight = highlights.find(h => h.slug === slug);
   if (!highlight) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Highlight not found' }), 404);
