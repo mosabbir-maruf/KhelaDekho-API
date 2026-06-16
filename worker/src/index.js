@@ -1270,35 +1270,41 @@ app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
   }));
 });
 
-// --- Proxy (rewrites m3u8 URLs to bypass CORS) ---
+// --- Proxy (rewrites m3u8/MPD URLs to bypass CORS + Referer checks) ---
 app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
   const url = c.req.query('url');
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
   try {
     const resp = await fetch(url, {
-      headers: { 'User-Agent': nextUA(), 'Accept': '*/*', 'Accept-Language': 'en-US,en;q=0.9' },
+      headers: {
+        'User-Agent': nextUA(),
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': 'https://kickbd.com/',
+        'Origin': 'https://kickbd.com'
+      },
       redirect: 'follow'
     });
     let body = await resp.arrayBuffer();
     let contentType = resp.headers.get('content-type') || 'application/octet-stream';
 
     if (body.byteLength > 10) {
-      const head = new TextDecoder().decode(body.slice(0, 20));
+      const head = new TextDecoder().decode(body.slice(0, 50));
+      const reqUrl = new URL(c.req.url);
+      const proxyBase = `${reqUrl.origin}/api/v2/proxy?url=`;
+      const origUrl = new URL(url);
+      const baseDir = origUrl.pathname.substring(0, origUrl.pathname.lastIndexOf('/') + 1);
+
       if (head.startsWith('#EXTM3U')) {
         contentType = 'application/vnd.apple.mpegurl';
-        const reqUrl = new URL(c.req.url);
-        const proxyBase = `${reqUrl.origin}/api/v2/proxy?url=`;
         const text = new TextDecoder().decode(body);
-        const baseUrl = new URL(url);
-        const baseDir = baseUrl.pathname.substring(0, baseUrl.pathname.lastIndexOf('/') + 1);
-        const lines = text.split('\n');
-        const rewritten = lines.map(line => {
+        const rewritten = text.split('\n').map(line => {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith('#')) return line;
           try {
             const resolved = trimmed.startsWith('http')
               ? trimmed
-              : new URL(trimmed, baseUrl.origin + baseDir).href;
+              : new URL(trimmed, origUrl.origin + baseDir).href;
             return proxyBase + encodeURIComponent(resolved);
           } catch { return line; }
         }).join('\n');
