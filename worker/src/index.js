@@ -903,9 +903,13 @@ async function processChannel(ch) {
     } else if (iframeUrl.includes('kick.yagaverse.net')) {
       try {
         const yHtml = await fetchText(iframeUrl);
-        const sMatch = yHtml.match(/const streamUrl\s*=\s*'([^']+)'/);
+        const sMatch = yHtml.match(/const streamUrl\s*=\s*'([^']+)'/) ||
+          yHtml.match(/source:\s*'([^']+)'/) ||
+          yHtml.match(/file:\s*'([^']+)'/) ||
+          yHtml.match(/https?:\/\/[^"'\s>]+\.m3u8[^"'\s>]*/);
         if (sMatch) {
-          streamData = { stream_url: sMatch[1], stream_type: 'hls' };
+          const url = sMatch[1] || sMatch[0];
+          streamData = { stream_url: url, stream_type: 'hls' };
         }
       } catch (e) { /* skip */ }
     } else if (iframeUrl.includes('soccerball.st')) {
@@ -933,30 +937,15 @@ async function processChannel(ch) {
     }
   }
 
-  let alive = false;
-  if (streamData && streamData.stream_url) {
-    try {
-      const resp = await fetch(streamData.stream_url, {
-        headers: {
-          'User-Agent': nextUA(),
-          'Referer': 'https://kickbd.com/',
-          'Origin': 'https://kickbd.com'
-        },
-        redirect: 'follow'
-      });
-      alive = resp.ok || (streamData.drm_kid && streamData.stream_type === 'dash' && resp.status === 403);
-    } catch (e) { /* not alive */ }
-  }
-
   return {
     id: ch.id,
     name: ch.name,
     logo: ch.logo,
     stream_type: streamData ? streamData.stream_type : 'hls',
-    stream_url: alive && streamData ? streamData.stream_url : null,
-    drm_kid: alive && streamData ? (streamData.drm_kid || null) : null,
-    drm_key: alive && streamData ? (streamData.drm_key || null) : null,
-    is_alive: alive,
+    stream_url: streamData ? streamData.stream_url : null,
+    drm_kid: streamData ? (streamData.drm_kid || null) : null,
+    drm_key: streamData ? (streamData.drm_key || null) : null,
+    is_alive: !!streamData,
     cached_at: new Date().toISOString()
   };
 }
