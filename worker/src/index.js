@@ -755,7 +755,7 @@ function kickbdDecrypt(payloadUrlEnc) {
   const k = "999999859198";
   let r = "";
   for (let i = 0; i < decoded.length; i++) {
-    r += String.fromCharCode((decoded.charCodeAt(i) + 5) ^ k.charCodeAt(i % k.length));
+    r += String.fromCharCode((decoded.charCodeAt(i) + 5) ^ parseInt(k[i % k.length]));
   }
   return r;
 }
