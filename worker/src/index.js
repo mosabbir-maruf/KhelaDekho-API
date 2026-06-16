@@ -1175,7 +1175,7 @@ app.get('/api/v2/stats', rateLimiterMiddleware(100, 60), async (c) => {
 
 // --- Kickbd Channels ---
 app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
-  const channels = await getCachedOrFetch(c, 'kickbd_channels',
+  const channels = await getCachedOrFetch(c, 'kickbd_channels_v2',
     () => fetchKickbdChannels(), 1800);
   const q = c.req.query('q');
   const aliveOnly = c.req.query('alive') === 'true';
@@ -1186,7 +1186,7 @@ app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
 });
 
 app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c) => {
-  const channels = await getCachedOrFetch(c, 'kickbd_channels',
+  const channels = await getCachedOrFetch(c, 'kickbd_channels_v2',
     () => fetchKickbdChannels(), 1800);
   const channelId = parseInt(c.req.param('channel_id'), 10);
   const channel = channels.find(ch => ch.id === channelId);
