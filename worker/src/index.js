@@ -949,9 +949,8 @@ async function processChannel(ch) {
         const sHtml = await fetchText(iframeUrl);
         const proxyMatch = sHtml.match(/https?:\/\/[^"'<>\s]+s\d+\.php[^"'<>\s]*/);
         if (proxyMatch) {
-          const proxyHtml = await fetchText(proxyMatch[0]);
-          const m3u8s = proxyHtml.match(/https?:\/\/[^"'<>\s]+\.m3u8[^"'<>\s]*/g);
-          if (m3u8s) streamData = { stream_url: m3u8s[0], stream_type: 'hls' };
+          // Return the s1.php URL directly so the proxy resolves it live
+          streamData = { stream_url: proxyMatch[0], stream_type: 'hls' };
         }
       } catch (e) { /* skip */ }
     } else {
@@ -1211,6 +1210,66 @@ app.get('/api/v2/highlights/:slug', rateLimiterMiddleware(100, 60), async (c) =>
   return c.json(makeResponse(true, highlight));
 });
 
+// --- Kickbd Live Matches ---
+async function fetchKickbdMatches() {
+  const html = await fetchText(KICKBD_HOME);
+  const matches = [];
+  const now = Date.now();
+
+  const blocks = html.split(/<div\s+class="event-card"/);
+  for (let i = 1; i < blocks.length; i++) {
+    const chunk = blocks[i];
+    const linkMatch = chunk.match(/data-link="([^"]+)"/);
+    const timeMatch = chunk.match(/data-utc-time="([^"]+)"/);
+    if (!linkMatch || !timeMatch) continue;
+
+    const matchUrl = linkMatch[1];
+    const startsAt = new Date(timeMatch[1]);
+    if (isNaN(startsAt.getTime())) continue;
+
+    const matchSlug = matchUrl.split('/').pop();
+
+    const badgeMatch = chunk.match(/<div\s+class="sport-name-badge">\s*<span>([^<]*)<\/span>\s*<span\s+class="title-text">\s*([^<]*?)\s*<\/span>/);
+    let sportEmoji = '', league = '';
+    if (badgeMatch) {
+      sportEmoji = badgeMatch[1].trim();
+      league = badgeMatch[2].trim();
+    }
+
+    const teamRows = [...chunk.matchAll(/<div\s+class="fixture-team-row">\s*<div\s+class="fixture-logo-box">\s*<img\s+src="([^"]+)"\s+alt="([^"]+)"/g)];
+    if (teamRows.length < 2) continue;
+
+    const expireTime = startsAt.getTime() + 6 * 3600 * 1000;
+    const isLive = startsAt.getTime() <= now && now < expireTime;
+
+    matches.push({
+      id: matchSlug,
+      league,
+      sport_emoji: sportEmoji,
+      team_a: { name: teamRows[0][2].trim(), logo: teamRows[0][1] || null },
+      team_b: { name: teamRows[1][2].trim(), logo: teamRows[1][1] || null },
+      starts_at: startsAt.toISOString(),
+      match_url: matchUrl,
+      is_live: isLive,
+      cached_at: new Date().toISOString()
+    });
+  }
+
+  return matches;
+}
+
+app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
+  const allMatches = await getCachedOrFetch(c, 'kickbd_matches',
+    () => fetchKickbdMatches(), 120);
+  const live = allMatches.filter(m => m.is_live);
+  live.sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+  return c.json(makeResponse(true, {
+    matches: live,
+    total: live.length,
+    cached_at: new Date().toISOString()
+  }));
+});
+
 // --- Proxy (rewrites m3u8 URLs to bypass CORS) ---
 app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
   const url = c.req.query('url');
@@ -1221,11 +1280,12 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
       redirect: 'follow'
     });
     let body = await resp.arrayBuffer();
-    const contentType = resp.headers.get('content-type') || '';
+    let contentType = resp.headers.get('content-type') || 'application/octet-stream';
 
     if (body.byteLength > 10) {
       const head = new TextDecoder().decode(body.slice(0, 20));
       if (head.startsWith('#EXTM3U')) {
+        contentType = 'application/vnd.apple.mpegurl';
         const reqUrl = new URL(c.req.url);
         const proxyBase = `${reqUrl.origin}/api/v2/proxy?url=`;
         const text = new TextDecoder().decode(body);
@@ -1249,7 +1309,7 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
     return new Response(body, {
       status: resp.status,
       headers: {
-        'Content-Type': resp.headers.get('content-type') || 'application/octet-stream',
+        'Content-Type': contentType,
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'public, max-age=30'
       }

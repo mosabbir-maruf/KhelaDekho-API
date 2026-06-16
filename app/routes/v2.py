@@ -16,6 +16,8 @@ from app.models.v2 import (
     ChannelListResponse,
     Highlight,
     HighlightListResponse,
+    KickbdMatch,
+    KickbdMatchListResponse,
     SportzfyEvent,
     SportzfyEventListResponse,
     SportzfyHealthResponse,
@@ -28,6 +30,7 @@ from app.services.channels import (
     get_cached_highlight,
     get_cached_highlights,
 )
+from app.services.kickbd_matches import get_cached_kickbd_matches
 from app.services.sportzfy import get_cached_events, get_cached_playback
 
 logger = structlog.get_logger(__name__)
@@ -263,6 +266,22 @@ async def get_highlight(slug: str):
     if not highlight:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Highlight not found")
     return StandardResponse(success=True, data=highlight)
+
+
+@router.get(
+    "/matches/live",
+    response_model=StandardResponse[KickbdMatchListResponse],
+    dependencies=[Depends(rate_limit)],
+)
+async def list_live_matches():
+    matches = await get_cached_kickbd_matches()
+    live = [m for m in matches if m.is_live]
+    live.sort(key=lambda m: m.starts_at or datetime.max.replace(tzinfo=timezone.utc))
+    cached_at = datetime.now(BDT)
+    return StandardResponse(
+        success=True,
+        data=KickbdMatchListResponse(matches=live, total=len(live), cached_at=cached_at),
+    )
 
 
 _PROXY_FORWARD_HEADERS = {

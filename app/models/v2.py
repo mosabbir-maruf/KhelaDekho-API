@@ -100,3 +100,26 @@ class HighlightListResponse(BaseModel):
     highlights: list[Highlight]
     total: int
     cached_at: datetime
+
+
+class KickbdTeamInfo(BaseModel):
+    name: str
+    logo: Optional[str] = None
+
+
+class KickbdMatch(BaseModel):
+    id: str
+    league: str
+    sport_emoji: str = ""
+    team_a: KickbdTeamInfo
+    team_b: KickbdTeamInfo
+    starts_at: Optional[datetime] = None
+    match_url: str
+    is_live: bool = False
+    cached_at: datetime = Field(default_factory=lambda: datetime.now(BDT))
+
+
+class KickbdMatchListResponse(BaseModel):
+    matches: list[KickbdMatch]
+    total: int
+    cached_at: datetime
