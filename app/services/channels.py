@@ -16,7 +16,7 @@ from app.services.cache import cache
 
 logger = structlog.get_logger(__name__)
 
-_HOMEPAGE_URL = settings.kickbd_home_url
+_HOMEPAGE_URL = settings.v2_home_url
 _HOME_NETLOC = urlparse(_HOMEPAGE_URL).netloc
 _CDN_NETLOC = f"cdn.{_HOME_NETLOC}"
 

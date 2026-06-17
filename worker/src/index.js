@@ -686,7 +686,7 @@ const SPORTZFY_TARGET_URL = 'https://sportzfytvlive.xyz';
 const KICKBD_HOME = 'https://kickbd.org';
 
 function getKickbdHome(c) {
-  return c.env.KICKBD_HOME_URL || KICKBD_HOME;
+  return c.env.V2_HOME_URL || KICKBD_HOME;
 }
 
 // --- Concurrent Batch Processor ---

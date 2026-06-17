@@ -18,7 +18,7 @@ _SCRAPE_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-_HOMEPAGE_URL = settings.kickbd_home_url
+_HOMEPAGE_URL = settings.v2_home_url
 _LIVE_WINDOW_HOURS = 6
 
 _ATTR_RE = re.compile(r'data-link="([^"]+)"')
