@@ -49,17 +49,17 @@ app.use('*', cors({
 // Centralized Error Middleware
 app.onError((err, c) => {
   console.error("Worker Execution Error:", err);
-  
+
   let status = 500;
   let code = "INTERNAL_SERVER_ERROR";
   let message = "A critical system error occurred. Please try again later.";
-  
+
   if (err.status) {
     status = err.status;
     code = `HTTP_${status}`;
     message = err.message || message;
   }
-  
+
   return c.json(makeResponse(false, null, { code, message }), status);
 });
 
@@ -79,21 +79,21 @@ const rateLimiterMiddleware = (requests = 60, windowSecs = 60) => {
     const path = new URL(c.req.url).pathname;
     const key = `rate:${ip}:${path}`;
     const now = Math.floor(Date.now() / 1000);
-    
+
     // Check local memory first
     let clientHits = rateLimitCache.get(key) || [];
     clientHits = clientHits.filter(ts => ts > now - windowSecs);
-    
+
     if (clientHits.length >= requests) {
       return c.json(makeResponse(false, null, {
         code: "HTTP_429",
         message: "Request rate limit exceeded. Please back off."
       }), 429);
     }
-    
+
     clientHits.push(now);
     rateLimitCache.set(key, clientHits);
-    
+
     // Optional: Sync rate limiting to Cloudflare KV for distributed check
     if (c.env.KHELADEKHO_STORE) {
       try {
@@ -101,21 +101,21 @@ const rateLimiterMiddleware = (requests = 60, windowSecs = 60) => {
         const raw = await c.env.KHELADEKHO_STORE.get(kvKey);
         let kvHits = raw ? JSON.parse(raw) : [];
         kvHits = kvHits.filter(ts => ts > now - windowSecs);
-        
+
         if (kvHits.length >= requests) {
           return c.json(makeResponse(false, null, {
             code: "HTTP_429",
             message: "Request rate limit exceeded. Please back off."
           }), 429);
         }
-        
+
         kvHits.push(now);
         await c.env.KHELADEKHO_STORE.put(kvKey, JSON.stringify(kvHits), { expirationTtl: windowSecs });
       } catch (err) {
         console.warn("KV rate limiting sync failed, falling back to local memory:", err);
       }
     }
-    
+
     await next();
   };
 };
@@ -130,17 +130,17 @@ const verifySignature = async (c, next) => {
     }), 500);
   }
   const windowSecs = parseInt(c.env.SIGNATURE_WINDOW_SECONDS || '60', 10);
-  
+
   const token = c.req.header('X-Signature-Token');
   const timestampStr = c.req.header('X-Signature-Timestamp');
-  
+
   if (!token || !timestampStr) {
     return c.json(makeResponse(false, null, {
       code: "HTTP_401",
       message: "Secure session credentials missing"
     }), 401);
   }
-  
+
   const ts = parseInt(timestampStr, 10);
   if (isNaN(ts) || Math.abs(Math.floor(Date.now() / 1000) - ts) > windowSecs) {
     return c.json(makeResponse(false, null, {
@@ -148,15 +148,15 @@ const verifySignature = async (c, next) => {
       message: "Session signature expired"
     }), 401);
   }
-  
+
   // Verify HMAC-SHA256
   const path = new URL(c.req.url).pathname;
   const message = `${timestampStr}:${path}`;
-  
+
   const encoder = new TextEncoder();
   const keyData = encoder.encode(secret);
   const msgData = encoder.encode(message);
-  
+
   const cryptoKey = await crypto.subtle.importKey(
     'raw',
     keyData,
@@ -164,23 +164,23 @@ const verifySignature = async (c, next) => {
     false,
     ['sign', 'verify']
   );
-  
+
   const signatureBuffer = await crypto.subtle.sign(
     'HMAC',
     cryptoKey,
     msgData
   );
-  
+
   const hashArray = Array.from(new Uint8Array(signatureBuffer));
   const expectedToken = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  
+
   if (expectedToken !== token) {
     return c.json(makeResponse(false, null, {
       code: "HTTP_401",
       message: "Signature validation failed"
     }), 401);
   }
-  
+
   await next();
 };
 
@@ -341,21 +341,21 @@ let scrapingPromise = null;
 // Cache Stamede-Proof Getter using Cloudflare Cache API
 async function getCachedScrape(c) {
   const targetUrl = c.env.KHELADEKHO_TARGET_URL;
-  
+
   // Cloudflare native cache
   const cacheKey = new Request("http://kheladekho-cache.internal/data", { method: "GET" });
   const cache = caches.default;
   const cachedResponse = await cache.match(cacheKey);
-  
+
   if (cachedResponse) {
     return await cachedResponse.json();
   }
-  
+
   // If a scrape is already in progress, await it instead of launching another one
   if (scrapingPromise) {
     return await scrapingPromise;
   }
-  
+
   // Fetch fresh with lock
   scrapingPromise = scrapeAll(targetUrl)
     .then(freshData => {
@@ -372,7 +372,7 @@ async function getCachedScrape(c) {
     .finally(() => {
       scrapingPromise = null;
     });
-    
+
   return await scrapingPromise;
 }
 
@@ -407,10 +407,10 @@ app.get('/api/v1/matches', rateLimiterMiddleware(100, 60), async (c) => {
   const stageFilter = c.req.query('stage');
   const limit = safeInt(c.req.query('limit'), 50);
   const offset = safeInt(c.req.query('offset'), 0);
-  
+
   const scrape = await getCachedScrape(c);
   let matches = scrape.matches;
-  
+
   if (statusFilter) {
     matches = matches.filter(m => m.status === statusFilter);
   }
@@ -422,13 +422,13 @@ app.get('/api/v1/matches', rateLimiterMiddleware(100, 60), async (c) => {
     const sLower = stageFilter.toLowerCase();
     matches = matches.filter(m => m.stage && m.stage.toLowerCase().includes(sLower));
   }
-  
+
   // Sort by start_time
   matches.sort((a, b) => new Date(a.start_time || '9999-12-31') - new Date(b.start_time || '9999-12-31'));
-  
+
   const total = matches.length;
   const page = matches.slice(offset, offset + limit);
-  
+
   return c.json(makeResponse(true, {
     matches: page,
     total,
@@ -452,14 +452,14 @@ app.get('/api/v1/matches/:match_id', rateLimiterMiddleware(100, 60), async (c) =
   const matchId = c.req.param('match_id');
   const scrape = await getCachedScrape(c);
   const match = scrape.matches.find(m => m.match_id === matchId);
-  
+
   if (!match) {
     return c.json(makeResponse(false, null, {
       code: "HTTP_404",
       message: "Match not found"
     }), 404);
   }
-  
+
   return c.json(makeResponse(true, match));
 });
 
@@ -469,10 +469,10 @@ app.get('/api/v1/channels', rateLimiterMiddleware(100, 60), async (c) => {
   const categoryFilter = c.req.query('category');
   const limit = safeInt(c.req.query('limit'), 50);
   const offset = safeInt(c.req.query('offset'), 0);
-  
+
   const scrape = await getCachedScrape(c);
   let channels = scrape.channels;
-  
+
   if (statusFilter) {
     channels = channels.filter(ch => ch.status === statusFilter);
   }
@@ -480,12 +480,12 @@ app.get('/api/v1/channels', rateLimiterMiddleware(100, 60), async (c) => {
     const cLower = categoryFilter.toLowerCase();
     channels = channels.filter(ch => ch.category && ch.category.toLowerCase().includes(cLower));
   }
-  
+
   channels.sort((a, b) => a.sort_order - b.sort_order);
-  
+
   const total = channels.length;
   const page = channels.slice(offset, offset + limit);
-  
+
   return c.json(makeResponse(true, {
     channels: sanitizeChannels(page),
     total,
@@ -498,7 +498,7 @@ app.get('/api/v1/channels/live', rateLimiterMiddleware(100, 60), async (c) => {
   const scrape = await getCachedScrape(c);
   const live = scrape.channels.filter(ch => ch.status === 'live');
   live.sort((a, b) => b.live_viewers - a.live_viewers || a.sort_order - b.sort_order);
-  
+
   return c.json(makeResponse(true, {
     channels: sanitizeChannels(live),
     total: live.length,
@@ -524,7 +524,7 @@ async function decodePayload(payload, accessToken) {
       const raw = atob(reversed);
       return JSON.parse(raw);
     }
-    
+
     // Support legacy/data wrapped format
     if (payload && typeof payload === 'object' && payload.legacy && payload.data) {
       const dataStr = payload.data;
@@ -532,18 +532,18 @@ async function decodePayload(payload, accessToken) {
       const raw = atob(reversed);
       return JSON.parse(raw);
     }
-    
+
     // Support AES-GCM encrypted payload dictionary (v2)
     if (payload && typeof payload === 'object' && Number(payload.v) === 2) {
       if (!accessToken) {
         throw new Error("Access token is required for AES-GCM payload decryption");
       }
-      
+
       const encoder = new TextEncoder();
       const tokenStr = String(accessToken || "");
       const keyData = encoder.encode(tokenStr + "|mlbd-web-stream-v2");
       const keyBuffer = await crypto.subtle.digest("SHA-256", keyData);
-      
+
       const cryptoKey = await crypto.subtle.importKey(
         "raw",
         keyBuffer,
@@ -551,7 +551,7 @@ async function decodePayload(payload, accessToken) {
         false,
         ["decrypt"]
       );
-      
+
       const b64urlDecode = (s) => {
         let str = s.replace(/-/g, '+').replace(/_/g, '/');
         while (str.length % 4) {
@@ -564,16 +564,16 @@ async function decodePayload(payload, accessToken) {
         }
         return bytes;
       };
-      
+
       const iv = b64urlDecode(payload.iv);
       const ct = b64urlDecode(payload.ct);
       const tag = b64urlDecode(payload.tag);
-      
+
       // Concatenate ct and tag
       const cipherTextWithTag = new Uint8Array(ct.length + tag.length);
       cipherTextWithTag.set(ct);
       cipherTextWithTag.set(tag, ct.length);
-      
+
       const decryptedBuffer = await crypto.subtle.decrypt(
         {
           name: "AES-GCM",
@@ -583,12 +583,12 @@ async function decodePayload(payload, accessToken) {
         cryptoKey,
         cipherTextWithTag
       );
-      
+
       const textDecoder = new TextDecoder("utf-8");
       const plainText = textDecoder.decode(decryptedBuffer);
       return JSON.parse(plainText);
     }
-    
+
     throw new Error("Unsupported payload format or version");
   } catch (e) {
     console.error("Payload decoding failed:", e);
@@ -601,14 +601,14 @@ app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), v
   const channelKey = c.req.param('channel_key');
   const scrape = await getCachedScrape(c);
   const channel = scrape.channels.find(ch => ch.key === channelKey);
-  
+
   if (!channel) {
     return c.json(makeResponse(false, null, { code: "HTTP_404", message: "Channel not found" }), 404);
   }
   if (!channel.play_token) {
     return c.json(makeResponse(false, null, { code: "HTTP_400", message: "DRM credentials not configured for this channel" }), 400);
   }
-  
+
   // Edge Cache check for the decrypted URL payload (30 seconds)
   const streamCacheKey = new Request(`http://kheladekho-cache.internal/stream/${channelKey}`, { method: "GET" });
   const cache = caches.default;
@@ -616,7 +616,7 @@ app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), v
   if (cachedStream) {
     return c.json(makeResponse(true, await cachedStream.json()));
   }
-  
+
   // Post target request
   try {
     const targetUrl = c.env.KHELADEKHO_TARGET_URL;
@@ -634,19 +634,19 @@ app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), v
         access: channel.play_token
       })
     });
-    
+
     if (!res.ok) throw new Error("Upstream stream provider server returned status " + res.status);
     const respJson = await res.json();
-    
+
     if (!respJson.success || !respJson.payload) {
       return c.json(makeResponse(false, null, {
         code: "HTTP_502",
         message: respJson.message || "Failed to fetch stream details from upstream source"
       }), 502);
     }
-    
+
     const decoded = await decodePayload(respJson.payload, channel.play_token);
-    
+
     const responseData = {
       key: channel.key,
       name: channel.name,
@@ -657,13 +657,13 @@ app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), v
       sources: decoded.sources || [],
       expires_at: decoded.exp ? new Date(decoded.exp * 1000).toISOString() : null
     };
-    
+
     // Store in stream cache for 30 seconds
     const streamCacheResponse = new Response(JSON.stringify(responseData), {
       headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=30' }
     });
     c.executionCtx.waitUntil(cache.put(streamCacheKey, streamCacheResponse));
-    
+
     return c.json(makeResponse(true, responseData));
   } catch (err) {
     console.error("Upstream stream decryption request failed:", err);
@@ -1008,7 +1008,7 @@ async function processHighlight(slug) {
   try {
     const detailHtml = await fetchText(`${KICKBD_HOME}/highlights/${slug}`);
     const titleMatch = detailHtml.match(/<title[^>]*>(.*?)<\/title>/);
-    if (titleMatch) detail.title = titleMatch[1].replace(' || KicKBD.Com', '').trim();
+    if (titleMatch) detail.title = titleMatch[1].replace(' || KicKBD.Org', '').trim();
     const iframeMatch = detailHtml.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/);
     if (iframeMatch) {
       const streamUrl = iframeMatch[1];

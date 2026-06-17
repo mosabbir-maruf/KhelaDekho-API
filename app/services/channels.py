@@ -326,7 +326,7 @@ async def _extract_highlight_detail(slug: str, client: httpx.AsyncClient) -> dic
     if not html:
         return None
     title_match = re.search(r'<title[^>]*>(.*?)</title>', html)
-    title = title_match.group(1).replace(" || KicKBD.Com", "").strip() if title_match else slug
+    title = title_match.group(1).replace(" || KicKBD.Org", "").strip() if title_match else slug
 
     iframe_match = re.search(r'<iframe[^>]*src=["\']([^"\']+)["\'][^>]*>', html)
     if not iframe_match:
