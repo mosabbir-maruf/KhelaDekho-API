@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import httpx
 import structlog
 
+from app.config import settings
 from app.models.v2 import KickbdMatch, KickbdTeamInfo
 from app.services.cache import cache
 
@@ -17,7 +18,7 @@ _SCRAPE_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-_HOMEPAGE_URL = "https://kickbd.org"
+_HOMEPAGE_URL = settings.kickbd_home_url
 _LIVE_WINDOW_HOURS = 6
 
 _ATTR_RE = re.compile(r'data-link="([^"]+)"')

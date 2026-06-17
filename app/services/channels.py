@@ -8,10 +8,17 @@ from datetime import datetime, timezone
 import httpx
 import structlog
 
+from urllib.parse import urlparse
+
+from app.config import settings
 from app.models.v2 import Channel, Highlight
 from app.services.cache import cache
 
 logger = structlog.get_logger(__name__)
+
+_HOMEPAGE_URL = settings.kickbd_home_url
+_HOME_NETLOC = urlparse(_HOMEPAGE_URL).netloc
+_CDN_NETLOC = f"cdn.{_HOME_NETLOC}"
 
 _SCRAPE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15",
@@ -20,7 +27,15 @@ _SCRAPE_HEADERS = {
 }
 
 _DECRYPT_KEY = "999999859198"
-_HOMEPAGE_URL = "https://kickbd.org"
+
+_WATCH_RE = re.compile(
+    rf'href=["\']{re.escape(_HOMEPAGE_URL)}/watch/(\d+)["\'][^>]*>.*?'
+    rf'<img[^>]*src=["\']([^"\']+)["\'][^>]*alt=["\']([^"\']+)["\']',
+    re.DOTALL,
+)
+_HIGHLIGHT_RE = re.compile(
+    rf'href=["\']{re.escape(_HOMEPAGE_URL)}/highlights/([^"\']+)["\'][^>]*>',
+)
 
 
 def _decrypt_source(payload_urlenc: str) -> str:
@@ -79,12 +94,7 @@ async def _extract_channel_list() -> list[dict]:
     if not html:
         return []
     channels: list[dict] = []
-    pattern = re.compile(
-        r'href=["\']https://kickbd\.org/watch/(\d+)["\'][^>]*>.*?'
-        r'<img[^>]*src=["\']([^"\']+)["\'][^>]*alt=["\']([^"\']+)["\']',
-        re.DOTALL,
-    )
-    for match in pattern.finditer(html):
+    for match in _WATCH_RE.finditer(html):
         cid = int(match.group(1))
         logo = match.group(2)
         name = match.group(3).strip()
@@ -169,11 +179,11 @@ async def _extract_stream_from_soccerball(url: str, client: httpx.AsyncClient) -
 async def _extract_stream_url(iframe_url: str, client: httpx.AsyncClient) -> dict | None:
     if not iframe_url:
         return None
-    if "kickbd.org/source/" in iframe_url:
+    if f"{_HOME_NETLOC}/source/" in iframe_url:
         return await _extract_stream_from_source(iframe_url, client)
     elif "kick.yagaverse.net" in iframe_url:
         return await _extract_stream_from_yagaverse(iframe_url, client)
-    elif "kickbd.org/player/" in iframe_url:
+    elif f"{_HOME_NETLOC}/player/" in iframe_url:
         return await _extract_stream_from_player(iframe_url, client)
     elif "soccerball.st" in iframe_url:
         return await _extract_stream_from_soccerball(iframe_url, client)
@@ -193,8 +203,8 @@ async def _verify_stream(
             stream_url,
             headers={
                 **_SCRAPE_HEADERS,
-                "Referer": "https://kickbd.org/",
-                "Origin": "https://kickbd.org",
+                "Referer": f"{_HOMEPAGE_URL}/",
+                "Origin": _HOMEPAGE_URL,
             },
             timeout=5.0,
             follow_redirects=True,
@@ -306,10 +316,7 @@ async def _extract_highlight_list() -> list[dict]:
     if not html:
         return []
     highlights: list[dict] = []
-    for match in re.finditer(
-        r'href=["\']https://kickbd\.org/highlights/([^"\']+)["\'][^>]*>',
-        html,
-    ):
+    for match in _HIGHLIGHT_RE.finditer(html):
         slug = match.group(1)
         highlights.append({"slug": slug})
     seen = set()
@@ -326,7 +333,7 @@ async def _extract_highlight_detail(slug: str, client: httpx.AsyncClient) -> dic
     if not html:
         return None
     title_match = re.search(r'<title[^>]*>(.*?)</title>', html)
-    title = title_match.group(1).replace(" || KicKBD.Org", "").strip() if title_match else slug
+    title = re.sub(r'\s*\|\|\s*.*', '', title_match.group(1)).strip() if title_match else slug
 
     iframe_match = re.search(r'<iframe[^>]*src=["\']([^"\']+)["\'][^>]*>', html)
     if not iframe_match:
@@ -336,7 +343,7 @@ async def _extract_highlight_detail(slug: str, client: httpx.AsyncClient) -> dic
     sources = []
     final_url = None
 
-    if "cdn.kickbd.org/stream.php" in stream_url:
+    if f"{_CDN_NETLOC}/stream.php" in stream_url:
         inner_html = await _fetch_text(stream_url, client)
         if inner_html:
             payload_match = re.search(r'securePayload\s*=\s*"([^"]+)"', inner_html)
@@ -361,7 +368,7 @@ async def _extract_highlight_detail(slug: str, client: httpx.AsyncClient) -> dic
     return {
         "slug": slug,
         "title": title,
-        "stream_url": final_url or (stream_url if not stream_url.startswith("https://cdn.kickbd.org/stream.php") else None),
+        "stream_url": final_url or (stream_url if not stream_url.startswith(f"https://{_CDN_NETLOC}/stream.php") else None),
         "sources": sources,
         "is_alive": bool(final_url),
     }

@@ -685,6 +685,10 @@ const SPORTZFY_PLAYBACK_KEY = 'ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8'
 const SPORTZFY_TARGET_URL = 'https://sportzfytvlive.xyz';
 const KICKBD_HOME = 'https://kickbd.org';
 
+function getKickbdHome(c) {
+  return c.env.KICKBD_HOME_URL || KICKBD_HOME;
+}
+
 // --- Concurrent Batch Processor ---
 async function concurrentMap(items, fn, concurrency = 5) {
   const results = [];
@@ -903,17 +907,18 @@ async function fetchSportzfyPlayback(parent, targetUrl) {
 // Kickbd Helpers
 // =========================================================================
 
-async function processChannel(ch) {
+async function processChannel(ch, homeUrl) {
   let iframeUrl = null;
   try {
-    const watchHtml = await fetchText(`${KICKBD_HOME}/watch/${ch.id}`);
+    const watchHtml = await fetchText(`${homeUrl}/watch/${ch.id}`);
     const iframeMatch = watchHtml.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/);
     if (iframeMatch) iframeUrl = iframeMatch[1];
   } catch (e) { /* skip */ }
 
   let streamData = null;
   if (iframeUrl) {
-    if (iframeUrl.includes('kickbd.org/source/')) {
+    const homeHost = new URL(homeUrl).hostname;
+    if (iframeUrl.includes(`${homeHost}/source/`)) {
       try {
         const srcHtml = await fetchText(iframeUrl);
         const pMatch = srcHtml.match(/var _p\s*=\s*"([^"]+)"/);
@@ -954,7 +959,7 @@ async function processChannel(ch) {
         }
       } catch (e) { /* skip */ }
     } else {
-      // Generic handler for all other iframe types (also covers kickbd.org/player/)
+      // Generic handler for all other iframe types (also covers player/ paths)
       try {
         const pHtml = await fetchText(iframeUrl);
         const urlMatch = pHtml.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
@@ -981,8 +986,8 @@ async function processChannel(ch) {
   };
 }
 
-async function fetchKickbdChannels() {
-  const html = await fetchText(KICKBD_HOME);
+async function fetchKickbdChannels(homeUrl) {
+  const html = await fetchText(homeUrl);
   const $ = cheerio.load(html);
   const seen = new Set();
   const channels = [];
@@ -1000,19 +1005,20 @@ async function fetchKickbdChannels() {
   });
 
   // Parallel processing with concurrency=3 to avoid rate limiting
-  return await concurrentMap(channels, processChannel, 3);
+  return await concurrentMap(channels, ch => processChannel(ch, homeUrl), 3);
 }
 
-async function processHighlight(slug) {
+async function processHighlight(slug, homeUrl) {
   let detail = { slug, title: slug, stream_url: null, sources: [], is_alive: false };
   try {
-    const detailHtml = await fetchText(`${KICKBD_HOME}/highlights/${slug}`);
+    const detailHtml = await fetchText(`${homeUrl}/highlights/${slug}`);
     const titleMatch = detailHtml.match(/<title[^>]*>(.*?)<\/title>/);
-    if (titleMatch) detail.title = titleMatch[1].replace(' || KicKBD.Org', '').trim();
+    if (titleMatch) detail.title = titleMatch[1].replace(/\s*\|\|.*/, '').trim();
     const iframeMatch = detailHtml.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/);
     if (iframeMatch) {
       const streamUrl = iframeMatch[1];
-      if (streamUrl.includes('cdn.kickbd.org/stream.php')) {
+      const cdnHost = `cdn.${new URL(homeUrl).hostname}`;
+      if (streamUrl.includes(`${cdnHost}/stream.php`)) {
         try {
           const innerHtml = await fetchText(streamUrl);
           const payloadMatch = innerHtml.match(/securePayload\s*=\s*"([^"]+)"/);
@@ -1036,15 +1042,16 @@ async function processHighlight(slug) {
   return detail;
 }
 
-async function fetchKickbdHighlights() {
-  const html = await fetchText(KICKBD_HOME);
+async function fetchKickbdHighlights(homeUrl) {
+  const html = await fetchText(homeUrl);
   const slugSet = new Set();
-  const slugRegex = /href=["']https:\/\/kickbd\.org\/highlights\/([^"']+)["'][^>]*>/g;
+  const escapedHome = homeUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const slugRegex = new RegExp(`href=["']${escapedHome}/highlights/([^"']+)["'][^>]*>`, 'g');
   let m;
   while ((m = slugRegex.exec(html)) !== null) slugSet.add(m[1]);
 
   // Parallel processing with concurrency=5
-  return await concurrentMap([...slugSet], processHighlight, 5);
+  return await concurrentMap([...slugSet], s => processHighlight(s, homeUrl), 5);
 }
 
 // =========================================================================
@@ -1175,8 +1182,9 @@ app.get('/api/v2/stats', rateLimiterMiddleware(100, 60), async (c) => {
 
 // --- Kickbd Channels ---
 app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getKickbdHome(c);
   const channels = await getCachedOrFetch(c, 'kickbd_channels_v2',
-    () => fetchKickbdChannels(), 1800);
+    () => fetchKickbdChannels(homeUrl), 1800);
   const q = c.req.query('q');
   const aliveOnly = c.req.query('alive') === 'true';
   let filtered = channels;
@@ -1186,8 +1194,9 @@ app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
 });
 
 app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getKickbdHome(c);
   const channels = await getCachedOrFetch(c, 'kickbd_channels_v2',
-    () => fetchKickbdChannels(), 1800);
+    () => fetchKickbdChannels(homeUrl), 1800);
   const channelId = parseInt(c.req.param('channel_id'), 10);
   const channel = channels.find(ch => ch.id === channelId);
   if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
@@ -1196,14 +1205,16 @@ app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c
 
 // --- Kickbd Highlights ---
 app.get('/api/v2/highlights', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getKickbdHome(c);
   const highlights = await getCachedOrFetch(c, 'kickbd_highlights',
-    () => fetchKickbdHighlights(), 1800);
+    () => fetchKickbdHighlights(homeUrl), 1800);
   return c.json(makeResponse(true, { highlights, total: highlights.length, cached_at: new Date().toISOString() }));
 });
 
 app.get('/api/v2/highlights/:slug', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getKickbdHome(c);
   const highlights = await getCachedOrFetch(c, 'kickbd_highlights',
-    () => fetchKickbdHighlights(), 1800);
+    () => fetchKickbdHighlights(homeUrl), 1800);
   const slug = c.req.param('slug');
   const highlight = highlights.find(h => h.slug === slug);
   if (!highlight) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Highlight not found' }), 404);
@@ -1211,8 +1222,8 @@ app.get('/api/v2/highlights/:slug', rateLimiterMiddleware(100, 60), async (c) =>
 });
 
 // --- Kickbd Live Matches ---
-async function fetchKickbdMatches() {
-  const html = await fetchText(KICKBD_HOME);
+async function fetchKickbdMatches(homeUrl) {
+  const html = await fetchText(homeUrl);
   const matches = [];
   const now = Date.now();
 
@@ -1259,8 +1270,9 @@ async function fetchKickbdMatches() {
 }
 
 app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getKickbdHome(c);
   const allMatches = await getCachedOrFetch(c, 'kickbd_matches',
-    () => fetchKickbdMatches(), 120);
+    () => fetchKickbdMatches(homeUrl), 120);
   const live = allMatches.filter(m => m.is_live);
   live.sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
   return c.json(makeResponse(true, {
@@ -1274,14 +1286,15 @@ app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
 app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
   const url = c.req.query('url');
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
+  const homeUrl = getKickbdHome(c);
   try {
     const resp = await fetch(url, {
       headers: {
         'User-Agent': nextUA(),
         'Accept': '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://kickbd.org/',
-        'Origin': 'https://kickbd.org'
+        'Referer': `${homeUrl}/`,
+        'Origin': homeUrl
       },
       redirect: 'follow'
     });

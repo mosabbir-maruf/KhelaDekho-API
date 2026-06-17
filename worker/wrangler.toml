@@ -7,6 +7,7 @@ enabled = true
 
 [vars]
 KHELADEKHO_TARGET_URL = "https://livekhela.tv/"
+KICKBD_HOME_URL = "https://kickbd.org"
 SIGNATURE_WINDOW_SECONDS = "60"
 
 # Bind a KV namespace for rate limiting and fallback caching
