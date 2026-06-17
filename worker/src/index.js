@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import * as cheerio from 'cheerio';
 
 const app = new Hono();
 
@@ -225,62 +224,41 @@ async function scrapeAll(targetUrl) {
       continue;
     }
     const html = await res.text();
-    const $ = cheerio.load(html);
 
-    // 1. Matches Parsing
+    // 1. Matches Parsing (regex-based)
     const matches = [];
     const seenIds = new Set();
-
-    $('.match-card[data-match-id], .match-card[data-match-status], div[data-match-id]').each((i, card) => {
-      const $card = $(card);
-      let matchId = $card.attr('data-match-id') || '';
-
-      if (!matchId) {
-        const rows = $card.find('.team-row');
-        if (rows.length >= 2) {
-          const t1 = cleanText($(rows[0]).find('.team-name, .mcard-team b, .mcard-team').text());
-          const t2 = cleanText($(rows[1]).find('.team-name, .mcard-team b, .mcard-team').text());
-          const startTs = $card.attr('data-start-ts') || $card.attr('data-start') || '0';
-          const t1Slug = t1.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-          const t2Slug = t2.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-          matchId = `${t1Slug}-vs-${t2Slug}-${startTs}`;
-        } else {
-          return;
-        }
-      }
-
-      if (seenIds.has(matchId)) return;
-      seenIds.add(matchId);
-
-      const rows = $card.find('.team-row');
-      if (rows.length < 2) return;
-
-      const team1Name = cleanText($(rows[0]).find('.team-name, .mcard-team b, .mcard-team').text());
-      const team1Flag = $(rows[0]).find('img.flag, img.mcard-flag-img, .flag img, img[src*="flagcdn"]').attr('src') || null;
-      const team2Name = cleanText($(rows[1]).find('.team-name, .mcard-team b, .mcard-team').text());
-      const team2Flag = $(rows[1]).find('img.flag, img.mcard-flag-img, .flag img, img[src*="flagcdn"]').attr('src') || null;
-
-      const startTs = safeInt($card.attr('data-start-ts') || $card.attr('data-start'), 0);
-      const endTs = safeInt($card.attr('data-end-ts') || $card.attr('data-end'), 0);
-
-      let status = $card.attr('data-match-status') || $card.attr('data-status') || 'upcoming';
-      if (status === 'none' || !status) {
-        if ($card.find('[data-mode="live"], .live-dot.green').length > 0) status = 'live';
-        else if ($card.hasClass('live-row')) status = 'live';
-        else if ($card.hasClass('is-finished')) status = 'finished';
-      }
-
-      matches.push({
-        match_id: matchId,
-        group: cleanText($card.find('.match-group').text()),
-        stage: cleanText($card.find('[data-stage], .group-tag').text()) || 'Group Stage',
-        team1: { name: team1Name, flag_url: team1Flag },
-        team2: { name: team2Name, flag_url: team2Flag },
-        start_time: startTs ? new Date(startTs * 1000).toISOString() : null,
-        end_time: endTs ? new Date(endTs * 1000).toISOString() : null,
-        status: status
+    const cardRegex = /<div[^>]*class="[^"]*match-card[^"]*"[^>]*data-match-id="?([^"\s]*)"?[^>]*>[\s\S]*?<div[^>]*class="[^"]*team-row[^"]*"[^>]*>[\s\S]*?<\/div>\s*<\/div>/g;
+    const teamsInCard = /<div[^>]*class="[^"]*team-row[^"]*"[^>]*>([\s\S]*?)<\/div>/g;
+    let cardMatch;
+    while ((cardMatch = cardRegex.exec(html)) !== null) {
+      const cardHtml = cardMatch[0];
+      const teams = [...cardHtml.matchAll(teamsInCard)];
+      if (teams.length < 2) continue;
+      const parseTeam = (html) => ({
+        name: cleanText((html.match(/class="[^"]*team-name[^"]*"[^>]*>([^<]*)/) || [])[1] || ''),
+        flag: (html.match(/<img[^>]*src="([^"]*flagcdn[^"]*)"/) || [])[1] || (html.match(/<img[^>]*class="[^"]*flag[^"]*"[^>]*src="([^"]*)"/) || [])[1] || null
       });
-    });
+      const t1 = parseTeam(teams[0][1]);
+      const t2 = parseTeam(teams[1][1]);
+      if (!t1.name || !t2.name) continue;
+      const t1Slug = t1.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const t2Slug = t2.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+      const startTs = parseInt((cardHtml.match(/data-start(?:-ts)?="?(\d+)"?/) || [])[1], 10) || 0;
+      const endTs = parseInt((cardHtml.match(/data-end(?:-ts)?="?(\d+)"?/) || [])[1], 10) || 0;
+      const matchId = (cardMatch[1] || `${t1Slug}-vs-${t2Slug}-${startTs}`);
+      if (seenIds.has(matchId)) continue;
+      seenIds.add(matchId);
+      let status = (cardHtml.match(/data-match-status="?([^"\s]*)"?/) || [])[1] || 'upcoming';
+      if (status === 'none' || !status) status = cardHtml.includes('data-mode="live"') || cardHtml.includes('live-dot green') || cardHtml.includes('live-row') ? 'live' : cardHtml.includes('is-finished') ? 'finished' : status;
+      matches.push({
+        match_id: matchId, group: cleanText((cardHtml.match(/class="[^"]*match-group[^"]*"[^>]*>([^<]*)/) || [])[1] || ''),
+        stage: cleanText((cardHtml.match(/class="[^"]*(?:group-tag|data-stage)[^"]*"[^>]*>([^<]*)/) || [])[1] || 'Group Stage'),
+        team1: { name: t1.name, flag_url: t1.flag }, team2: { name: t2.name, flag_url: t2.flag },
+        start_time: startTs ? new Date(startTs * 1000).toISOString() : null,
+        end_time: endTs ? new Date(endTs * 1000).toISOString() : null, status
+      });
+    }
 
     // 2. Channels Parsing
     let channels = [];
@@ -290,29 +268,20 @@ async function scrapeAll(targetUrl) {
       try {
         const parsedData = JSON.parse(scriptMatch[1]);
         channels = parsedData.map(item => ({
-          key: item.key || '',
-          name: item.name || '',
-          image_url: item.image || null,
-          category: item.category || 'Sports',
-          quality: item.quality || 'HD',
-          status: item.status || 'live',
-          sort_order: item.sort || 99,
-          total_views: item.views || 0,
-          live_viewers: item.live || 0,
-          resolution: item.resolution || 'Auto',
-          source_types: item.source_types || [],
-          play_token: item.play_token || null,
-          play_exp: item.play_exp || null,
+          key: item.key || '', name: item.name || '', image_url: item.image || null,
+          category: item.category || 'Sports', quality: item.quality || 'HD',
+          status: item.status || 'live', sort_order: item.sort || 99,
+          total_views: item.views || 0, live_viewers: item.live || 0,
+          resolution: item.resolution || 'Auto', source_types: item.source_types || [],
+          play_token: item.play_token || null, play_exp: item.play_exp || null,
           fetched_at: new Date().toISOString()
         })).filter(c => c.key);
-      } catch (e) {
-        console.warn("Failed to parse CHANNELS script array:", e);
-      }
+      } catch (e) { console.warn("Failed to parse CHANNELS script array:", e); }
     }
 
     // 3. Platform Stats
-    const liveViewers = safeInt($('[data-stats-live], #currentLiveCount, .watch-metric.live strong').text());
-    const allViews = parseViews($('[data-stats-views], #currentViewCount, .watch-metric strong').text());
+    const liveViewers = safeInt((html.match(/data-stats-live[^>]*>(\d+)/) || html.match(/currentLiveCount[^>]*>(\d+)/) || [])[1]);
+    const allViews = parseInt((html.match(/data-stats-views[^>]*>([\d.]+[kK]?)/) || html.match(/currentViewCount[^>]*>([\d.]+[kK]?)/) || [])[1]?.replace(/[kK]/g, '000') || '0', 10);
     const totalChannels = channels.length;
 
     return {
@@ -990,21 +959,16 @@ async function processChannel(ch, homeUrl) {
 
 async function fetchKickbdChannels(homeUrl) {
   const html = await fetchText(homeUrl);
-  const $ = cheerio.load(html);
   const seen = new Set();
   const channels = [];
-  $('a[href*="/watch/"]').each((i, el) => {
-    const href = $(el).attr('href') || '';
-    const match = href.match(/\/watch\/(\d+)/);
-    if (!match) return;
-    const id = parseInt(match[1], 10);
-    if (seen.has(id)) return;
+  const watchRegex = /<a[^>]*href="[^"]*\/watch\/(\d+)"[^>]*>[\s\S]*?<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*>/g;
+  let m;
+  while ((m = watchRegex.exec(html)) !== null) {
+    const id = parseInt(m[1], 10);
+    if (seen.has(id)) continue;
     seen.add(id);
-    const img = $(el).find('img');
-    const name = img.attr('alt') || $(el).text().trim() || 'Channel ' + id;
-    const logo = img.attr('src') || null;
-    channels.push({ id, name, logo });
-  });
+    channels.push({ id, name: m[3].trim() || 'Channel ' + id, logo: m[2] || null });
+  }
 
   // Parallel processing with concurrency=3 to avoid rate limiting
   return await concurrentMap(channels, ch => processChannel(ch, homeUrl), 3);

@@ -8,7 +8,6 @@
     "deploy": "wrangler deploy"
   },
   "dependencies": {
-    "cheerio": "^1.0.0-rc.12",
     "hono": "^4.0.0"
   },
   "devDependencies": {
