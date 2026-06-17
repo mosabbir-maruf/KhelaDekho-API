@@ -119,70 +119,6 @@ const rateLimiterMiddleware = (requests = 60, windowSecs = 60) => {
   };
 };
 
-// Cryptographic HMAC-SHA256 Signature Middleware (Anti-Hotlinking)
-const verifySignature = async (c, next) => {
-  const secret = c.env.KHELADEKHO_SECRET_KEY;
-  if (!secret) {
-    return c.json(makeResponse(false, null, {
-      code: "HTTP_500",
-      message: "Worker secret configuration missing"
-    }), 500);
-  }
-  const windowSecs = parseInt(c.env.SIGNATURE_WINDOW_SECONDS || '60', 10);
-
-  const token = c.req.header('X-Signature-Token');
-  const timestampStr = c.req.header('X-Signature-Timestamp');
-
-  if (!token || !timestampStr) {
-    return c.json(makeResponse(false, null, {
-      code: "HTTP_401",
-      message: "Secure session credentials missing"
-    }), 401);
-  }
-
-  const ts = parseInt(timestampStr, 10);
-  if (isNaN(ts) || Math.abs(Math.floor(Date.now() / 1000) - ts) > windowSecs) {
-    return c.json(makeResponse(false, null, {
-      code: "HTTP_401",
-      message: "Session signature expired"
-    }), 401);
-  }
-
-  // Verify HMAC-SHA256
-  const path = new URL(c.req.url).pathname;
-  const message = `${timestampStr}:${path}`;
-
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
-  const msgData = encoder.encode(message);
-
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw',
-    keyData,
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign', 'verify']
-  );
-
-  const signatureBuffer = await crypto.subtle.sign(
-    'HMAC',
-    cryptoKey,
-    msgData
-  );
-
-  const hashArray = Array.from(new Uint8Array(signatureBuffer));
-  const expectedToken = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-  if (expectedToken !== token) {
-    return c.json(makeResponse(false, null, {
-      code: "HTTP_401",
-      message: "Signature validation failed"
-    }), 401);
-  }
-
-  await next();
-};
-
 // Browser-mimicking User-Agent rotation
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -565,8 +501,8 @@ async function decodePayload(payload, accessToken) {
   }
 }
 
-// Endpoints: Get Decrypted Channel Stream (Rate-limited, cryptographically verified)
-app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), verifySignature, async (c) => {
+// Endpoints: Get Decrypted Channel Stream (Rate-limited)
+app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), async (c) => {
   const channelKey = c.req.param('channel_key');
   const scrape = await getCachedScrape(c);
   const channel = scrape.channels.find(ch => ch.key === channelKey);
