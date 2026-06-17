@@ -8,4 +8,5 @@ enabled = true
 [vars]
 V1_HOME_URL = "https://livekhela.movielinkbd.li/"
 V2_HOME_URL = "https://kickbd.org"
+V4_HOME_URL = "https://tv.proxybdix.com/"
 SIGNATURE_WINDOW_SECONDS = "60"

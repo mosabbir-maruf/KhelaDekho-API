@@ -652,12 +652,17 @@ export default app;
 // --- Shared Constants ---
 const SPORTZFY_PLAYBACK_KEY = 'ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8';
 const SPORTZFY_TARGET_URL = 'https://sportzfytvlive.xyz';
+const PROXYBDIX_TARGET_URL = 'https://tv.proxybdix.com';
 function getV2Home(c) {
   return c.env.V2_HOME_URL;
 }
 
 function getV1Home(c) {
   return c.env.V1_HOME_URL;
+}
+
+function getV4Home(c) {
+  return c.env.V4_HOME_URL || PROXYBDIX_TARGET_URL;
 }
 
 // --- Concurrent Batch Processor ---
@@ -1311,4 +1316,182 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
   } catch (e) {
     return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Failed to fetch stream' }), 502);
   }
+});
+
+// =========================================================================
+// V4 Routes — tv.proxybdix.com
+// =========================================================================
+
+// --- Proxybdix Helper ---
+async function fetchJson(url) {
+  const res = await fetch(url, {
+    headers: { 'User-Agent': nextUA(), 'Accept': 'application/json' }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function fetchProxybdixChannels(baseUrl) {
+  const list = await fetchJson(`${baseUrl}/api.php?action=list`);
+  if (!Array.isArray(list) || list.length === 0) return [];
+
+  const configs = await Promise.all(
+    list.map(ch => fetchJson(`${baseUrl}/api.php?action=config&id=${ch.id}`)
+      .catch(() => null))
+  );
+
+  return list.map((ch, i) => {
+    const cfg = configs[i];
+    let stream_url = null, stream_type = 'dash', drm_kid = null, drm_key = null;
+    if (cfg && cfg.m) {
+      stream_url = cfg.m;
+      stream_type = cfg.m.includes('.mpd') ? 'dash' : (cfg.m.includes('.m3u8') || cfg.m.includes('.m3u')) ? 'hls' : 'dash';
+      drm_kid = cfg.k || null;
+      drm_key = cfg.v || null;
+    }
+    return {
+      id: ch.id,
+      name: ch.name || ch.id,
+      stream_url,
+      stream_type,
+      drm_kid,
+      drm_key,
+      cached_at: new Date().toISOString()
+    };
+  });
+}
+
+// --- Health ---
+app.get('/api/v4/health', rateLimiterMiddleware(100, 60), (c) => {
+  return c.json(makeResponse(true, {
+    status: 'ok', version: '4.0.0', source: 'tv.proxybdix.com'
+  }));
+});
+
+// --- List Channels ---
+app.get('/api/v4/channels', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV4Home(c);
+  let channels = await getCachedOrFetch(c, 'proxybdix_channels',
+    () => fetchProxybdixChannels(homeUrl), 120);
+
+  const q = c.req.query('q');
+  const alive = c.req.query('alive');
+  if (alive) channels = channels.filter(ch => ch.stream_url);
+  if (q) {
+    const query = q.toLowerCase();
+    channels = channels.filter(ch => ch.name.toLowerCase().includes(query));
+  }
+  return c.json(makeResponse(true, {
+    channels,
+    total: channels.length,
+    cached_at: new Date().toISOString()
+  }));
+});
+
+// --- Single Channel ---
+app.get('/api/v4/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV4Home(c);
+  const channels = await getCachedOrFetch(c, 'proxybdix_channels',
+    () => fetchProxybdixChannels(homeUrl), 120);
+  const channelId = c.req.param('channel_id');
+  const channel = channels.find(ch => ch.id === channelId);
+  if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
+  return c.json(makeResponse(true, channel));
+});
+
+// --- Stream ---
+app.get('/api/v4/channels/:channel_id/stream', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV4Home(c);
+  const channels = await getCachedOrFetch(c, 'proxybdix_channels',
+    () => fetchProxybdixChannels(homeUrl), 120);
+  const channelId = c.req.param('channel_id');
+  const channel = channels.find(ch => ch.id === channelId);
+  if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
+  if (!channel.stream_url) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'Stream URL not available' }), 400);
+  return c.json(makeResponse(true, {
+    id: channel.id,
+    name: channel.name,
+    url: channel.stream_url,
+    type: channel.stream_type,
+    drm_kid: channel.drm_kid,
+    drm_key: channel.drm_key
+  }));
+});
+
+// --- Proxy ---
+app.get('/api/v4/proxy', rateLimiterMiddleware(100, 60), async (c) => {
+  const url = c.req.query('url');
+  if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
+  const homeUrl = getV4Home(c);
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': nextUA(),
+        'Accept': '*/*',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': `${homeUrl}/`,
+        'Origin': homeUrl
+      },
+      redirect: 'follow'
+    });
+    let body = await resp.arrayBuffer();
+    let contentType = resp.headers.get('content-type') || 'application/octet-stream';
+
+    if (body.byteLength > 10) {
+      const head = new TextDecoder().decode(body.slice(0, 50));
+      const reqUrl = new URL(c.req.url);
+      const proxyBase = `${reqUrl.origin}/api/v4/proxy?url=`;
+      const origUrl = new URL(url);
+      const baseDir = origUrl.pathname.substring(0, origUrl.pathname.lastIndexOf('/') + 1);
+
+      if (head.startsWith('#EXTM3U')) {
+        contentType = 'application/vnd.apple.mpegurl';
+        const text = new TextDecoder().decode(body);
+        const rewritten = text.split('\n').map(line => {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith('#')) return line;
+          try {
+            const resolved = trimmed.startsWith('http')
+              ? trimmed
+              : new URL(trimmed, origUrl.origin + baseDir).href;
+            return proxyBase + encodeURIComponent(resolved);
+          } catch { return line; }
+        }).join('\n');
+        body = new TextEncoder().encode(rewritten).buffer;
+      } else if (head.includes('<MPD') || head.includes('<?xml')) {
+        contentType = 'application/dash+xml';
+        let text = new TextDecoder().decode(body);
+        const cdnBase = origUrl.origin + baseDir;
+        if (!text.includes('<BaseURL')) {
+          text = text.replace('<MPD', `<MPD><BaseURL>${cdnBase}</BaseURL>`);
+        }
+        body = new TextEncoder().encode(text).buffer;
+      }
+    }
+
+    return new Response(body, {
+      status: resp.status,
+      headers: {
+        'Content-Type': contentType,
+        'Access-Control-Allow-Origin': '*',
+        'Cache-Control': 'public, max-age=30'
+      }
+    });
+  } catch (e) {
+    return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Failed to fetch stream' }), 502);
+  }
+});
+
+// --- Stats ---
+app.get('/api/v4/stats', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV4Home(c);
+  const channels = await getCachedOrFetch(c, 'proxybdix_channels',
+    () => fetchProxybdixChannels(homeUrl), 120);
+  let users = 0;
+  try { const data = await fetchJson(`${homeUrl}/api.php?action=count`); users = data.users || 0; } catch (e) {}
+  return c.json(makeResponse(true, {
+    online_users: users,
+    channel_count: channels.length,
+    cached_at: new Date().toISOString()
+  }));
 });
