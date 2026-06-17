@@ -683,10 +683,12 @@ export default app;
 // --- Shared Constants ---
 const SPORTZFY_PLAYBACK_KEY = 'ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8';
 const SPORTZFY_TARGET_URL = 'https://sportzfytvlive.xyz';
-const KICKBD_HOME = 'https://kickbd.org';
+function getV2Home(c) {
+  return c.env.V2_HOME_URL;
+}
 
-function getKickbdHome(c) {
-  return c.env.V2_HOME_URL || KICKBD_HOME;
+function getV1Home(c) {
+  return c.env.V1_HOME_URL;
 }
 
 // --- Concurrent Batch Processor ---
@@ -1182,7 +1184,7 @@ app.get('/api/v2/stats', rateLimiterMiddleware(100, 60), async (c) => {
 
 // --- Kickbd Channels ---
 app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
-  const homeUrl = getKickbdHome(c);
+  const homeUrl = getV2Home(c);
   const channels = await getCachedOrFetch(c, 'kickbd_channels_v2',
     () => fetchKickbdChannels(homeUrl), 1800);
   const q = c.req.query('q');
@@ -1194,7 +1196,7 @@ app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
 });
 
 app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c) => {
-  const homeUrl = getKickbdHome(c);
+  const homeUrl = getV2Home(c);
   const channels = await getCachedOrFetch(c, 'kickbd_channels_v2',
     () => fetchKickbdChannels(homeUrl), 1800);
   const channelId = parseInt(c.req.param('channel_id'), 10);
@@ -1205,14 +1207,14 @@ app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c
 
 // --- Kickbd Highlights ---
 app.get('/api/v2/highlights', rateLimiterMiddleware(100, 60), async (c) => {
-  const homeUrl = getKickbdHome(c);
+  const homeUrl = getV2Home(c);
   const highlights = await getCachedOrFetch(c, 'kickbd_highlights',
     () => fetchKickbdHighlights(homeUrl), 1800);
   return c.json(makeResponse(true, { highlights, total: highlights.length, cached_at: new Date().toISOString() }));
 });
 
 app.get('/api/v2/highlights/:slug', rateLimiterMiddleware(100, 60), async (c) => {
-  const homeUrl = getKickbdHome(c);
+  const homeUrl = getV2Home(c);
   const highlights = await getCachedOrFetch(c, 'kickbd_highlights',
     () => fetchKickbdHighlights(homeUrl), 1800);
   const slug = c.req.param('slug');
@@ -1270,7 +1272,7 @@ async function fetchKickbdMatches(homeUrl) {
 }
 
 app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
-  const homeUrl = getKickbdHome(c);
+  const homeUrl = getV2Home(c);
   const allMatches = await getCachedOrFetch(c, 'kickbd_matches',
     () => fetchKickbdMatches(homeUrl), 120);
   const live = allMatches.filter(m => m.is_live);
@@ -1286,7 +1288,7 @@ app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
 app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
   const url = c.req.query('url');
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
-  const homeUrl = getKickbdHome(c);
+  const homeUrl = getV2Home(c);
   try {
     const resp = await fetch(url, {
       headers: {

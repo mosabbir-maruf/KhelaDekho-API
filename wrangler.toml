@@ -6,7 +6,6 @@ compatibility_date = "2026-06-13"
 enabled = true
 
 [vars]
-KHELADEKHO_TARGET_URL = "https://livekhela.tv/"
 V1_HOME_URL = "https://livekhela.tv/"
 V2_HOME_URL = "https://kickbd.org"
 SIGNATURE_WINDOW_SECONDS = "60"

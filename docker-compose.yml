@@ -6,6 +6,7 @@ services:
     environment:
       - KHELADEKHO_SECRET_KEY=${KHELADEKHO_SECRET_KEY}
       - KHELADEKHO_V1_HOME_URL=https://livekhela.tv/
+      - KHELADEKHO_V2_HOME_URL=https://kickbd.org
       - KHELADEKHO_REDIS_URL=redis://redis:6379/0
       - KHELADEKHO_DEBUG=false
       - KHELADEKHO_LOG_LEVEL=INFO

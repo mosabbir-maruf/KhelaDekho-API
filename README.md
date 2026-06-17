@@ -54,8 +54,9 @@ To configure the API, create a `.env` file in the root directory:
 # Cryptographic Token Signing Key (Required in Production)
 KHELADEKHO_SECRET_KEY=production-super-secret-key-fallback-change-me
 
-# Upstream Scraper Target URL
+# Upstream Scraper Target URLs
 KHELADEKHO_V1_HOME_URL=https://livekhela.tv/
+KHELADEKHO_V2_HOME_URL=https://kickbd.org/
 
 # Cache & Connection Configurations
 KHELADEKHO_REDIS_URL=redis://localhost:6379/0
