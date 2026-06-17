@@ -80,7 +80,7 @@ async def _extract_channel_list() -> list[dict]:
         return []
     channels: list[dict] = []
     pattern = re.compile(
-        r'href=["\']https://kickbd\.com/watch/(\d+)["\'][^>]*>.*?'
+        r'href=["\']https://kickbd\.org/watch/(\d+)["\'][^>]*>.*?'
         r'<img[^>]*src=["\']([^"\']+)["\'][^>]*alt=["\']([^"\']+)["\']',
         re.DOTALL,
     )
@@ -307,7 +307,7 @@ async def _extract_highlight_list() -> list[dict]:
         return []
     highlights: list[dict] = []
     for match in re.finditer(
-        r'href=["\']https://kickbd\.com/highlights/([^"\']+)["\'][^>]*>',
+        r'href=["\']https://kickbd\.org/highlights/([^"\']+)["\'][^>]*>',
         html,
     ):
         slug = match.group(1)

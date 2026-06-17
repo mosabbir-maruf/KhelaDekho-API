@@ -1039,7 +1039,7 @@ async function processHighlight(slug) {
 async function fetchKickbdHighlights() {
   const html = await fetchText(KICKBD_HOME);
   const slugSet = new Set();
-  const slugRegex = /href=["']https:\/\/kickbd\.com\/highlights\/([^"']+)["'][^>]*>/g;
+  const slugRegex = /href=["']https:\/\/kickbd\.org\/highlights\/([^"']+)["'][^>]*>/g;
   let m;
   while ((m = slugRegex.exec(html)) !== null) slugSet.add(m[1]);
 
