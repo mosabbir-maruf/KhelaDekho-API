@@ -683,7 +683,7 @@ export default app;
 // --- Shared Constants ---
 const SPORTZFY_PLAYBACK_KEY = 'ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8';
 const SPORTZFY_TARGET_URL = 'https://sportzfytvlive.xyz';
-const KICKBD_HOME = 'https://kickbd.com';
+const KICKBD_HOME = 'https://kickbd.org';
 
 // --- Concurrent Batch Processor ---
 async function concurrentMap(items, fn, concurrency = 5) {
@@ -913,7 +913,7 @@ async function processChannel(ch) {
 
   let streamData = null;
   if (iframeUrl) {
-    if (iframeUrl.includes('kickbd.com/source/')) {
+    if (iframeUrl.includes('kickbd.org/source/')) {
       try {
         const srcHtml = await fetchText(iframeUrl);
         const pMatch = srcHtml.match(/var _p\s*=\s*"([^"]+)"/);
@@ -954,7 +954,7 @@ async function processChannel(ch) {
         }
       } catch (e) { /* skip */ }
     } else {
-      // Generic handler for all other iframe types (also covers kickbd.com/player/)
+      // Generic handler for all other iframe types (also covers kickbd.org/player/)
       try {
         const pHtml = await fetchText(iframeUrl);
         const urlMatch = pHtml.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
@@ -1012,7 +1012,7 @@ async function processHighlight(slug) {
     const iframeMatch = detailHtml.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/);
     if (iframeMatch) {
       const streamUrl = iframeMatch[1];
-      if (streamUrl.includes('cdn.kickbd.com/stream.php')) {
+      if (streamUrl.includes('cdn.kickbd.org/stream.php')) {
         try {
           const innerHtml = await fetchText(streamUrl);
           const payloadMatch = innerHtml.match(/securePayload\s*=\s*"([^"]+)"/);
@@ -1280,8 +1280,8 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         'User-Agent': nextUA(),
         'Accept': '*/*',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Referer': 'https://kickbd.com/',
-        'Origin': 'https://kickbd.com'
+        'Referer': 'https://kickbd.org/',
+        'Origin': 'https://kickbd.org'
       },
       redirect: 'follow'
     });

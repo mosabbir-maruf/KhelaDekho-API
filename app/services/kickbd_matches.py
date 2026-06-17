@@ -17,7 +17,7 @@ _SCRAPE_HEADERS = {
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-_HOMEPAGE_URL = "https://kickbd.com"
+_HOMEPAGE_URL = "https://kickbd.org"
 _LIVE_WINDOW_HOURS = 6
 
 _ATTR_RE = re.compile(r'data-link="([^"]+)"')

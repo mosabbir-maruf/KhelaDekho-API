@@ -20,7 +20,7 @@ _SCRAPE_HEADERS = {
 }
 
 _DECRYPT_KEY = "999999859198"
-_HOMEPAGE_URL = "https://kickbd.com"
+_HOMEPAGE_URL = "https://kickbd.org"
 
 
 def _decrypt_source(payload_urlenc: str) -> str:
@@ -169,11 +169,11 @@ async def _extract_stream_from_soccerball(url: str, client: httpx.AsyncClient) -
 async def _extract_stream_url(iframe_url: str, client: httpx.AsyncClient) -> dict | None:
     if not iframe_url:
         return None
-    if "kickbd.com/source/" in iframe_url:
+    if "kickbd.org/source/" in iframe_url:
         return await _extract_stream_from_source(iframe_url, client)
     elif "kick.yagaverse.net" in iframe_url:
         return await _extract_stream_from_yagaverse(iframe_url, client)
-    elif "kickbd.com/player/" in iframe_url:
+    elif "kickbd.org/player/" in iframe_url:
         return await _extract_stream_from_player(iframe_url, client)
     elif "soccerball.st" in iframe_url:
         return await _extract_stream_from_soccerball(iframe_url, client)
@@ -193,8 +193,8 @@ async def _verify_stream(
             stream_url,
             headers={
                 **_SCRAPE_HEADERS,
-                "Referer": "https://kickbd.com/",
-                "Origin": "https://kickbd.com",
+                "Referer": "https://kickbd.org/",
+                "Origin": "https://kickbd.org",
             },
             timeout=5.0,
             follow_redirects=True,
@@ -336,7 +336,7 @@ async def _extract_highlight_detail(slug: str, client: httpx.AsyncClient) -> dic
     sources = []
     final_url = None
 
-    if "cdn.kickbd.com/stream.php" in stream_url:
+    if "cdn.kickbd.org/stream.php" in stream_url:
         inner_html = await _fetch_text(stream_url, client)
         if inner_html:
             payload_match = re.search(r'securePayload\s*=\s*"([^"]+)"', inner_html)
@@ -361,7 +361,7 @@ async def _extract_highlight_detail(slug: str, client: httpx.AsyncClient) -> dic
     return {
         "slug": slug,
         "title": title,
-        "stream_url": final_url or (stream_url if not stream_url.startswith("https://cdn.kickbd.com/stream.php") else None),
+        "stream_url": final_url or (stream_url if not stream_url.startswith("https://cdn.kickbd.org/stream.php") else None),
         "sources": sources,
         "is_alive": bool(final_url),
     }
