@@ -526,7 +526,7 @@ app.get('/api/v1/channels/:channel_key/stream', rateLimiterMiddleware(30, 60), a
   try {
     const targetUrl = c.env.V1_HOME_URL;
     const baseUrl = targetUrl.replace(/\/+$/, '');
-    const res = await fetch(`${baseUrl}/api/channel`, {
+    const res = await fetch(`${baseUrl}/v1/mks/channel`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
