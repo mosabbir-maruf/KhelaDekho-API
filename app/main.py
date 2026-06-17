@@ -432,7 +432,7 @@ async def get_channel_stream(
     # Call target API to get stream payload
     headers = build_headers()
     headers["Content-Type"] = "application/x-www-form-urlencoded;charset=UTF-8"
-    base_url = settings.target_url.rstrip("/")
+    base_url = settings.v1_home_url.rstrip("/")
     headers["Origin"] = base_url
     headers["Referer"] = f"{base_url}/"
 

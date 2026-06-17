@@ -5,7 +5,7 @@ BDT = timezone(timedelta(hours=6))
 
 
 class Settings(BaseSettings):
-    target_url: str = ""
+    v1_home_url: str = ""
     v2_home_url: str = "https://kickbd.org"
     sportzfy_target_url: str = "https://sportzfytvlive.xyz"
     sportzfy_playback_key: str = "ZESBtSlRTuF4Ac4k757OuasOWOA0W8LcqRn3SFgdInDoMyS8"

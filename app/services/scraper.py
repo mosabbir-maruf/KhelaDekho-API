@@ -33,9 +33,9 @@ class KhelaDekhoScraper:
 
         try:
             client = await self._get_client()
-            html = await fetch_page(client, settings.target_url)
+            html = await fetch_page(client, settings.v1_home_url)
         except Exception as e:
-            logger.error("scrape_failed", url=settings.target_url, error=str(e))
+            logger.error("scrape_failed", url=settings.v1_home_url, error=str(e))
             return ScrapeResult(
                 errors=[f"Failed to fetch page: {str(e)}"],
                 fetched_at=datetime.now(BDT),

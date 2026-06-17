@@ -55,7 +55,7 @@ To configure the API, create a `.env` file in the root directory:
 KHELADEKHO_SECRET_KEY=production-super-secret-key-fallback-change-me
 
 # Upstream Scraper Target URL
-KHELADEKHO_TARGET_URL=https://livekhela.tv/
+KHELADEKHO_V1_HOME_URL=https://livekhela.tv/
 
 # Cache & Connection Configurations
 KHELADEKHO_REDIS_URL=redis://localhost:6379/0
