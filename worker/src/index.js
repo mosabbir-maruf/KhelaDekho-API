@@ -42,8 +42,23 @@ const makeResponse = (success, data = null, error = null) => ({
 app.use('*', cors({
   origin: '*', // Can restrict to allowed origins via env
   allowMethods: ['GET', 'OPTIONS'],
-  allowHeaders: ['X-Signature-Token', 'X-Signature-Timestamp', 'Content-Type', 'User-Agent']
+  allowHeaders: ['X-Signature-Token', 'X-Signature-Timestamp', 'xkey', 'Content-Type', 'User-Agent']
 }));
+
+// xkey Validation Middleware
+app.use('*', async (c, next) => {
+  const expected = c.env.XKEY;
+  if (expected) {
+    const provided = c.req.header('xkey');
+    if (!provided || provided !== expected) {
+      return c.json(makeResponse(false, null, {
+        code: 'HTTP_401',
+        message: 'Invalid or missing xkey.'
+      }), 401);
+    }
+  }
+  await next();
+});
 
 // Centralized Error Middleware
 app.onError((err, c) => {
