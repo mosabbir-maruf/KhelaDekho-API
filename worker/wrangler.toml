@@ -9,7 +9,7 @@ enabled = true
 V1_HOME_URL = "https://livekhela.movielinkbd.li/"
 V2_HOME_URL = "https://kickbd.org"
 V4_HOME_URL = "https://tv.proxybdix.com/"
-XKEY = ""
+# XKEY is set as a secret via Cloudflare Dashboard or `wrangler secret put XKEY`
 
 # Bind a KV namespace for rate limiting and fallback caching
 # To use: wrangler kv:namespace create KHELADEKHO_STORE
