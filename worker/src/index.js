@@ -1305,8 +1305,7 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         // Initialization element: sourceURL
         text = text.replace(/<Initialization[^>]*>/g, (tag) => rewriteAttr(tag, 'sourceURL'));
 
-        // Remove BaseURL so unmatched relative segment URLs resolve against proxy URL, not CDN
-        text = text.replace(/<BaseURL>[^<]*<\/BaseURL>/g, '');
+        // Keep existing BaseURL as fallback for any URLs our rewriting misses
 
         body = new TextEncoder().encode(text).buffer;
       }
