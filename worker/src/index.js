@@ -1221,6 +1221,7 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
   const homeUrl = getV2Home(c);
   try {
+    const isSegmentReq = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init');
     const resp = await fetch(url, {
       headers: {
         'User-Agent': nextUA(),
@@ -1230,10 +1231,9 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         'Origin': homeUrl
       },
       redirect: 'follow',
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(isSegmentReq ? 15000 : 8000)
     });
     // Stream segments directly (no buffering) to minimize startup latency
-    const isSegmentReq = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init');
     if (isSegmentReq) {
       return new Response(resp.body, {
         status: resp.status,
