@@ -1229,7 +1229,8 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         'Referer': `${homeUrl}/`,
         'Origin': homeUrl
       },
-      redirect: 'follow'
+      redirect: 'follow',
+      signal: AbortSignal.timeout(15000)
     });
     let body = await resp.arrayBuffer();
     let contentType = resp.headers.get('content-type') || 'application/octet-stream';
@@ -1268,7 +1269,7 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
     }
 
     // Cache segments long (immutable) vs manifests short
-    const isSegment = url.match(/\.ts($|\?)/) || url.includes('/seg_') || url.includes('/segment');
+    const isSegment = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init');
     const cacheMaxAge = isSegment ? 86400 : 60;
     return new Response(body, {
       status: resp.status,
@@ -1428,18 +1429,20 @@ app.get('/api/v4/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         let text = new TextDecoder().decode(body);
         const cdnBase = origUrl.origin + baseDir;
         if (!text.includes('<BaseURL')) {
-          text = text.replace('<MPD', `<MPD><BaseURL>${cdnBase}</BaseURL>`);
+          text = text.replace(/(<MPD[^>]*>)/, `$1<BaseURL>${cdnBase}</BaseURL>`);
         }
         body = new TextEncoder().encode(text).buffer;
       }
     }
 
+    const isSegment = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init');
+    const cacheMaxAge = isSegment ? 86400 : 60;
     return new Response(body, {
       status: resp.status,
       headers: {
         'Content-Type': contentType,
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=30'
+        'Cache-Control': `public, max-age=${cacheMaxAge}`
       }
     });
   } catch (e) {
