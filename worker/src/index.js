@@ -864,7 +864,7 @@ async function processChannel(ch, homeUrl) {
           }
         }
       } catch (e) { /* skip */ }
-    } else if (iframeUrl.includes('kick.yagaverse.net')) {
+    } else if (iframeUrl.includes('yagaverse.net')) {
       try {
         const yHtml = await fetchText(iframeUrl);
         const sMatch = yHtml.match(/const streamUrl\s*=\s*'([^']+)'/) ||
@@ -1103,6 +1103,11 @@ app.get('/api/v2/stats', rateLimiterMiddleware(100, 60), async (c) => {
 });
 
 // --- Kickbd Channels ---
+function proxyStreamUrl(url) {
+  if (!url) return null;
+  return `/api/v2/proxy?url=${encodeURIComponent(url)}`;
+}
+
 app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
   const homeUrl = getV2Home(c);
   const channels = await getCachedOrFetch(c, 'kickbd_channels_v2',
@@ -1112,7 +1117,8 @@ app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
   let filtered = channels;
   if (aliveOnly) filtered = filtered.filter(ch => ch.is_alive);
   if (q) { const query = q.toLowerCase(); filtered = filtered.filter(ch => ch.name.toLowerCase().includes(query)); }
-  return c.json(makeResponse(true, { channels: filtered, total: filtered.length, cached_at: new Date().toISOString() }));
+  const proxied = filtered.map(ch => ({ ...ch, stream_url: proxyStreamUrl(ch.stream_url) }));
+  return c.json(makeResponse(true, { channels: proxied, total: proxied.length, cached_at: new Date().toISOString() }));
 });
 
 app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c) => {
@@ -1122,7 +1128,7 @@ app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c
   const channelId = parseInt(c.req.param('channel_id'), 10);
   const channel = channels.find(ch => ch.id === channelId);
   if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
-  return c.json(makeResponse(true, channel));
+  return c.json(makeResponse(true, { ...channel, stream_url: proxyStreamUrl(channel.stream_url) }));
 });
 
 // --- Kickbd Highlights ---

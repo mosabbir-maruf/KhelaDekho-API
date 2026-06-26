@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -215,6 +216,12 @@ async def list_channels(
     if q:
         query = q.lower()
         channels = [c for c in channels if query in c.name.lower()]
+
+    proxy_base = "/api/v2/proxy?url="
+    for ch in channels:
+        if ch.stream_url:
+            ch.stream_url = f"{proxy_base}{urllib.parse.quote(ch.stream_url, safe='')}"
+
     cached_at = datetime.now(BDT)
     return StandardResponse(
         success=True,
@@ -235,6 +242,11 @@ async def get_channel(channel_id: int):
     channel = await get_cached_channel(channel_id)
     if not channel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
+
+    proxy_base = "/api/v2/proxy?url="
+    if channel.stream_url:
+        channel.stream_url = f"{proxy_base}{urllib.parse.quote(channel.stream_url, safe='')}"
+
     return StandardResponse(success=True, data=channel)
 
 
