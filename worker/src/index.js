@@ -927,7 +927,9 @@ async function fetchKickbdChannels(homeUrl) {
     const id = parseInt(m[1], 10);
     if (seen.has(id)) continue;
     seen.add(id);
-    channels.push({ id, name: m[3].trim() || 'Channel ' + id, logo: m[2] || null });
+    const rawName = m[3].trim() || 'Channel ' + id;
+    const name = rawName.replace(/^KickBD\s+/i, '');
+    channels.push({ id, name, logo: m[2] || null });
   }
 
   return await concurrentMap(channels, ch => processChannel(ch, homeUrl), 9);
@@ -1242,14 +1244,14 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
       if (head.startsWith('#EXTM3U')) {
         contentType = 'application/vnd.apple.mpegurl';
         const text = new TextDecoder().decode(body);
+        // Rewrite relative URLs to absolute CDN URLs (browser fetches segments directly)
         const rewritten = text.split('\n').map(line => {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith('#')) return line;
           try {
-            const resolved = trimmed.startsWith('http')
+            return trimmed.startsWith('http')
               ? trimmed
               : new URL(trimmed, origUrl.origin + baseDir).href;
-            return proxyBase + encodeURIComponent(resolved);
           } catch { return line; }
         }).join('\n');
         body = new TextEncoder().encode(rewritten).buffer;

@@ -97,7 +97,7 @@ async def _extract_channel_list() -> list[dict]:
     for match in _WATCH_RE.finditer(html):
         cid = int(match.group(1))
         logo = match.group(2)
-        name = match.group(3).strip()
+        name = re.sub(r'^KickBD\s+', '', match.group(3).strip(), flags=re.IGNORECASE)
         channels.append({"id": cid, "name": name, "logo": logo})
     seen = set()
     unique = []
