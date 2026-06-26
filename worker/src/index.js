@@ -976,16 +976,39 @@ app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
 async function fetchMatchChannels(matchUrl) {
   try {
     const html = await fetchText(matchUrl);
-    const iframeMatches = [...html.matchAll(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/g)];
-    if (iframeMatches.length === 0) return [];
+    const iframeMatch = html.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/);
+    if (!iframeMatch) return [];
 
-    const streamResults = await Promise.all(iframeMatches.map(m => extractStreamDataFromIframe(m[1])));
+    const iframeHtml = await fetchText(iframeMatch[1]);
+    if (!iframeHtml) return [];
+
+    const tvMatch = iframeHtml.match(/const\s+tvChannels\s*=\s*({.*?});/s);
+    if (!tvMatch) return [];
+
+    let tvData;
+    try {
+      tvData = JSON.parse(tvMatch[1]);
+    } catch (e) { return []; }
+
+    const entries = [];
+    for (const [chName, servers] of Object.entries(tvData)) {
+      if (typeof servers === 'object' && servers !== null) {
+        for (const [serverName, info] of Object.entries(servers)) {
+          if (info && info.url) {
+            entries.push({ name: `${chName} - ${serverName}`, url: info.url });
+          }
+        }
+      }
+    }
+    if (entries.length === 0) return [];
+
+    const streamResults = await Promise.all(entries.map(e => extractStreamDataFromIframe(e.url)));
 
     const channels = [];
-    for (let i = 0; i < iframeMatches.length; i++) {
+    for (let i = 0; i < entries.length; i++) {
       const result = streamResults[i];
       if (!result || !result.stream_url) {
-        channels.push({ name: `Stream ${i + 1}`, stream_type: 'hls', stream_url: null, drm_kid: null, drm_key: null, is_alive: false });
+        channels.push({ name: entries[i].name, stream_type: 'hls', stream_url: null, drm_kid: null, drm_key: null, is_alive: false });
         continue;
       }
       const isDrmDash = !!(result.drm_kid) && result.stream_type === 'dash';
@@ -999,7 +1022,7 @@ async function fetchMatchChannels(matchUrl) {
         alive = resp.ok || (isDrmDash && resp.status === 403);
       } catch (e) { /* not alive */ }
       channels.push({
-        name: `Stream ${i + 1}`,
+        name: entries[i].name,
         stream_type: result.stream_type || 'hls',
         stream_url: alive ? result.stream_url : null,
         drm_kid: result.drm_kid || null,

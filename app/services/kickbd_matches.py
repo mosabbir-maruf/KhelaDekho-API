@@ -129,6 +129,26 @@ async def get_cached_kickbd_matches() -> list[KickbdMatch]:
 
 
 _IFRAME_RE = re.compile(r'<iframe[^>]*src=["\']([^"\']+)["\'][^>]*>')
+_TV_CHANNELS_RE = re.compile(r'const\s+tvChannels\s*=\s*({.*?});', re.DOTALL)
+
+
+async def _parse_tv_channels(html: str) -> list[tuple[str, str]]:
+    match = _TV_CHANNELS_RE.search(html)
+    if not match:
+        return []
+    try:
+        import json
+        tv_data = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return []
+
+    entries: list[tuple[str, str]] = []
+    for ch_name, servers in tv_data.items():
+        if isinstance(servers, dict):
+            for server_name, info in servers.items():
+                if isinstance(info, dict) and info.get("url"):
+                    entries.append((f"{ch_name} - {server_name}", info["url"]))
+    return entries
 
 
 async def fetch_match_channels(match_url: str) -> list[MatchStream]:
@@ -141,16 +161,24 @@ async def fetch_match_channels(match_url: str) -> list[MatchStream]:
         if not iframe_matches:
             return []
 
+        iframe_html = await _fetch_text(iframe_matches[0], client)
+        if not iframe_html:
+            return []
+
+        channel_entries = await _parse_tv_channels(iframe_html)
+        if not channel_entries:
+            return []
+
         results = await asyncio.gather(
-            *[_extract_stream_url(url, client) for url in iframe_matches],
+            *[_extract_stream_url(url, client) for _, url in channel_entries],
             return_exceptions=True,
         )
 
     async with httpx.AsyncClient(timeout=5.0) as verify_client:
         channels: list[MatchStream] = []
-        for i, result in enumerate(results):
+        for i, ((ch_name, _), result) in enumerate(zip(channel_entries, results)):
             if not isinstance(result, dict) or not result.get("stream_url"):
-                channels.append(MatchStream(name=f"Stream {i + 1}", is_alive=False))
+                channels.append(MatchStream(name=ch_name, is_alive=False))
                 continue
 
             stream_url = result["stream_url"]
@@ -162,7 +190,7 @@ async def fetch_match_channels(match_url: str) -> list[MatchStream]:
             )
 
             channels.append(MatchStream(
-                name=f"Stream {i + 1}",
+                name=ch_name,
                 stream_type=result.get("stream_type", "hls"),
                 stream_url=stream_url if alive else None,
                 drm_kid=result.get("drm_kid"),

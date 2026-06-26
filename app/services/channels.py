@@ -181,7 +181,7 @@ async def _extract_stream_url(iframe_url: str, client: httpx.AsyncClient) -> dic
         return None
     if f"{_HOME_NETLOC}/source/" in iframe_url:
         return await _extract_stream_from_source(iframe_url, client)
-    elif "kick.yagaverse.net" in iframe_url:
+    elif "yagaverse.net" in iframe_url:
         return await _extract_stream_from_yagaverse(iframe_url, client)
     elif f"{_HOME_NETLOC}/player/" in iframe_url:
         return await _extract_stream_from_player(iframe_url, client)
