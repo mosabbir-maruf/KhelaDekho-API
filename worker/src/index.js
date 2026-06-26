@@ -1260,10 +1260,29 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         contentType = 'application/dash+xml';
         let text = new TextDecoder().decode(body);
         const cdnBase = origUrl.origin + baseDir;
-        // Inject BaseURL after the opening <MPD ...> tag so namespace attrs stay valid
-        if (!text.includes('<BaseURL')) {
-          text = text.replace(/(<MPD[^>]*>)/, `$1<BaseURL>${cdnBase}</BaseURL>`);
-        }
+
+        // Rewrite DASH segment URLs to go through proxy (CDN rejects direct segment fetches from browser)
+        const encodeDashUrl = (url) => {
+          if (url.startsWith('/api/v2/proxy')) return url;
+          const absolute = url.startsWith('http') ? url : new URL(url, cdnBase).href;
+          // Split by DASH template variables ($Number$, $Time$, etc.), encode non-template parts only
+          return proxyBase + absolute.split(/(\$Number\$|\$Time\$|\$RepresentationID\$|\$Bandwidth\$)/).map(part => {
+            if (part.startsWith('$') && part.endsWith('$')) return part;
+            return encodeURIComponent(part);
+          }).join('');
+        };
+
+        // Rewrite URLs inside SegmentTemplate and SegmentURL tags
+        text = text.replace(/<SegmentTemplate[^>]*>/g, (tag) =>
+          tag.replace(/\b(media|initialization)="([^"]+)"/g, (m, attr, url) => `${attr}="${encodeDashUrl(url)}"`)
+        );
+        text = text.replace(/<SegmentURL[^>]*\/>/g, (tag) =>
+          tag.replace(/\bmedia="([^"]+)"/g, (m, url) => `media="${encodeDashUrl(url)}"`)
+        );
+
+        // Remove BaseURL — all segment URLs are now absolute proxy URLs
+        text = text.replace(/<BaseURL>[^<]*<\/BaseURL>/g, '');
+
         body = new TextEncoder().encode(text).buffer;
       }
     }
