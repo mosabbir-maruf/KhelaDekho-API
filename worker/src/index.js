@@ -1244,14 +1244,14 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
       if (head.startsWith('#EXTM3U')) {
         contentType = 'application/vnd.apple.mpegurl';
         const text = new TextDecoder().decode(body);
-        // Rewrite relative URLs to absolute CDN URLs (browser fetches segments directly)
         const rewritten = text.split('\n').map(line => {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith('#')) return line;
           try {
-            return trimmed.startsWith('http')
+            const resolved = trimmed.startsWith('http')
               ? trimmed
               : new URL(trimmed, origUrl.origin + baseDir).href;
+            return proxyBase + encodeURIComponent(resolved);
           } catch { return line; }
         }).join('\n');
         body = new TextEncoder().encode(rewritten).buffer;
@@ -1267,12 +1267,15 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
       }
     }
 
+    // Cache segments long (immutable) vs manifests short
+    const isSegment = url.match(/\.ts($|\?)/) || url.includes('/seg_') || url.includes('/segment');
+    const cacheMaxAge = isSegment ? 86400 : 60;
     return new Response(body, {
       status: resp.status,
       headers: {
         'Content-Type': contentType,
         'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=30'
+        'Cache-Control': `public, max-age=${cacheMaxAge}`
       }
     });
   } catch (e) {
