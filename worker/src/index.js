@@ -734,7 +734,8 @@ async function fetchText(url, headers = {}) {
       'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
       'Accept-Language': 'en-US,en;q=0.9',
       ...headers
-    }
+    },
+    signal: AbortSignal.timeout(10000)
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return await res.text();
@@ -929,8 +930,7 @@ async function fetchKickbdChannels(homeUrl) {
     channels.push({ id, name: m[3].trim() || 'Channel ' + id, logo: m[2] || null });
   }
 
-  // Parallel processing with concurrency=3 to avoid rate limiting
-  return await concurrentMap(channels, ch => processChannel(ch, homeUrl), 3);
+  return await concurrentMap(channels, ch => processChannel(ch, homeUrl), 9);
 }
 
 async function processHighlight(slug, homeUrl) {
