@@ -1219,7 +1219,8 @@ app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
 app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
   const url = c.req.query('url');
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
-  const homeUrl = getV2Home(c);
+  const source = c.req.query('source') || 'v2';
+  const homeUrl = source === 'v4' ? getV4Home(c) : getV2Home(c);
   try {
     const isSegmentReq = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init');
     const resp = await fetch(url, {
@@ -1288,7 +1289,9 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         // Helper to rewrite attribute values (handles both " and ' quotes)
         const rewriteAttr = (tag, attr) => {
           const re = new RegExp(`\\b(${attr})\\s*=\\s*"([^"]*)"`, 'g');
-          return tag.replace(re, (m, name, val) => `${name}="${encodeDashUrl(val)}"`);
+          const re2 = new RegExp(`\\b(${attr})\\s*='([^']*)'`, 'g');
+          return tag.replace(re, (m, name, val) => `${name}="${encodeDashUrl(val)}"`)
+                    .replace(re2, (m, name, val) => `${name}='${encodeDashUrl(val)}'`);
         };
 
         // SegmentTemplate: media, initialization
@@ -1302,8 +1305,7 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         // Initialization element: sourceURL
         text = text.replace(/<Initialization[^>]*>/g, (tag) => rewriteAttr(tag, 'sourceURL'));
 
-        // Remove BaseURL — all segment URLs are now absolute proxy URLs
-        text = text.replace(/<BaseURL>[^<]*<\/BaseURL>/g, '');
+        // Keep existing BaseURL as fallback for any URLs our rewriting misses
 
         body = new TextEncoder().encode(text).buffer;
       }
