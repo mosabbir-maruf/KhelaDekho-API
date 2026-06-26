@@ -1232,6 +1232,19 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
       redirect: 'follow',
       signal: AbortSignal.timeout(15000)
     });
+    // Stream segments directly (no buffering) to minimize startup latency
+    const isSegmentReq = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init');
+    if (isSegmentReq) {
+      return new Response(resp.body, {
+        status: resp.status,
+        headers: {
+          'Content-Type': resp.headers.get('content-type') || 'application/octet-stream',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=86400'
+        }
+      });
+    }
+
     let body = await resp.arrayBuffer();
     let contentType = resp.headers.get('content-type') || 'application/octet-stream';
 
