@@ -1268,9 +1268,10 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
       }
     }
 
-    // Cache segments long (immutable) vs manifests short
-    const isSegment = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init');
-    const cacheMaxAge = isSegment ? 86400 : 60;
+    // Cache segments (immutable) long; manifests (m3u8/mpd) never — tokens expire fast
+    const cacheMaxAge = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init')
+      ? 86400
+      : 0;
     return new Response(body, {
       status: resp.status,
       headers: {
