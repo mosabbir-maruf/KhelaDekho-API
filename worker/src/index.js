@@ -45,8 +45,11 @@ app.use('*', cors({
   allowHeaders: ['X-Signature-Token', 'X-Signature-Timestamp', 'xkey', 'Content-Type', 'User-Agent']
 }));
 
-// xkey Validation Middleware
+// xkey Validation Middleware — skip proxy routes (HLS player can't send xkey header)
 app.use('*', async (c, next) => {
+  const path = new URL(c.req.url).pathname;
+  if (path.endsWith('/proxy')) return await next();
+
   const expected = c.env.XKEY;
   if (expected) {
     const provided = c.req.header('xkey');
