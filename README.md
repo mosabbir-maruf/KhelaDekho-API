@@ -67,13 +67,14 @@ All endpoints return a standard JSON envelope: `{ success, data, error }`.
 | `GET /api/v1/stats` | Platform metrics |
 | `GET /api/v1/channels/:channel_key/stream` | Decrypted stream URL + DRM keys |
 
-### V2 — Sportzfy
+### V2 — Kickbd
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/v2/events` | Live events |
 | `GET /api/v2/channels` | Channel list |
 | `GET /api/v2/channels/:id` | Single channel details |
-| `GET /api/v2/channels/:id/stream` | Stream URL |
+| `GET /api/v2/highlights` | Highlight list |
+| `GET /api/v2/highlights/:slug` | Single highlight detail |
+| `GET /api/v2/matches/live` | Live matches |
 | `GET /api/v2/proxy?url=` | CORS proxy for stream segments |
 
 ### V4 — ProxyBDIX
