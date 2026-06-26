@@ -1259,9 +1259,9 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         contentType = 'application/dash+xml';
         let text = new TextDecoder().decode(body);
         const cdnBase = origUrl.origin + baseDir;
-        // Inject BaseURL so Shaka resolves segments against the CDN, not the proxy
+        // Inject BaseURL after the opening <MPD ...> tag so namespace attrs stay valid
         if (!text.includes('<BaseURL')) {
-          text = text.replace('<MPD', `<MPD><BaseURL>${cdnBase}</BaseURL>`);
+          text = text.replace(/(<MPD[^>]*>)/, `$1<BaseURL>${cdnBase}</BaseURL>`);
         }
         body = new TextEncoder().encode(text).buffer;
       }
