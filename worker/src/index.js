@@ -1285,13 +1285,22 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
           }).join('');
         };
 
-        // Rewrite URLs inside SegmentTemplate and SegmentURL tags
-        text = text.replace(/<SegmentTemplate[^>]*>/g, (tag) =>
-          tag.replace(/\b(media|initialization)="([^"]+)"/g, (m, attr, url) => `${attr}="${encodeDashUrl(url)}"`)
-        );
-        text = text.replace(/<SegmentURL[^>]*\/>/g, (tag) =>
-          tag.replace(/\bmedia="([^"]+)"/g, (m, url) => `media="${encodeDashUrl(url)}"`)
-        );
+        // Helper to rewrite attribute values (handles both " and ' quotes)
+        const rewriteAttr = (tag, attr) => {
+          const re = new RegExp(`\\b(${attr})\\s*=\\s*"([^"]*)"`, 'g');
+          return tag.replace(re, (m, name, val) => `${name}="${encodeDashUrl(val)}"`);
+        };
+
+        // SegmentTemplate: media, initialization
+        text = text.replace(/<SegmentTemplate[^>]*>/g, (tag) => {
+          tag = rewriteAttr(tag, 'media');
+          tag = rewriteAttr(tag, 'initialization');
+          return tag;
+        });
+        // SegmentURL: media (any closing style)
+        text = text.replace(/<SegmentURL[^>]*>/g, (tag) => rewriteAttr(tag, 'media'));
+        // Initialization element: sourceURL
+        text = text.replace(/<Initialization[^>]*>/g, (tag) => rewriteAttr(tag, 'sourceURL'));
 
         // Remove BaseURL — all segment URLs are now absolute proxy URLs
         text = text.replace(/<BaseURL>[^<]*<\/BaseURL>/g, '');
