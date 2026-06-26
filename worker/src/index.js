@@ -719,6 +719,58 @@ async function fetchText(url, headers = {}) {
 // Kickbd Helpers
 // =========================================================================
 
+async function extractStreamDataFromIframe(iframeUrl) {
+  if (iframeUrl.includes('/source/')) {
+    try {
+      const srcHtml = await fetchText(iframeUrl);
+      const pMatch = srcHtml.match(/var _p\s*=\s*"([^"]+)"/);
+      if (!pMatch) return null;
+      const decrypted = kickbdDecrypt(pMatch[1]);
+      const urlMatch = decrypted.match(/window\.player\.load\('([^']+)'\)/);
+      const kidMatch = decrypted.match(/k_id='([^']+)'/);
+      const kvMatch = decrypted.match(/k_v='([^']+)'/);
+      if (!urlMatch) return null;
+      const result = { stream_url: urlMatch[1], stream_type: urlMatch[1].includes('.mpd') ? 'dash' : 'hls' };
+      if (kidMatch) result.drm_kid = kidMatch[1];
+      if (kvMatch) result.drm_key = kvMatch[1];
+      return result;
+    } catch (e) { return null; }
+  }
+  if (iframeUrl.includes('yagaverse.net')) {
+    try {
+      const yHtml = await fetchText(iframeUrl);
+      const sMatch = yHtml.match(/const streamUrl\s*=\s*'([^']+)'/) ||
+        yHtml.match(/source:\s*'([^']+)'/) ||
+        yHtml.match(/file:\s*'([^']+)'/) ||
+        yHtml.match(/https?:\/\/[^"'\s>]+\.m3u8[^"'\s>]*/);
+      if (sMatch) {
+        const url = sMatch[1] || sMatch[0];
+        return { stream_url: url, stream_type: 'hls' };
+      }
+    } catch (e) { /* skip */ }
+    return null;
+  }
+  if (iframeUrl.includes('soccerball.st')) {
+    try {
+      const sHtml = await fetchText(iframeUrl);
+      const proxyMatch = sHtml.match(/https?:\/\/[^"'<>\s]+s\d+\.php[^"'<>\s]*/);
+      if (proxyMatch) return { stream_url: proxyMatch[0], stream_type: 'hls' };
+    } catch (e) { /* skip */ }
+    return null;
+  }
+  try {
+    const pHtml = await fetchText(iframeUrl);
+    const urlMatch = pHtml.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
+    if (!urlMatch) return null;
+    const result = { stream_url: urlMatch[0], stream_type: urlMatch[0].includes('.mpd') ? 'dash' : 'hls' };
+    const kidMatch = pHtml.match(/k_id['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
+    const kvMatch = pHtml.match(/k_v['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
+    if (kidMatch) result.drm_kid = kidMatch[1];
+    if (kvMatch) result.drm_key = kvMatch[1];
+    return result;
+  } catch (e) { return null; }
+}
+
 async function processChannel(ch, homeUrl) {
   let iframeUrl = null;
   try {
@@ -727,63 +779,7 @@ async function processChannel(ch, homeUrl) {
     if (iframeMatch) iframeUrl = iframeMatch[1];
   } catch (e) { /* skip */ }
 
-  let streamData = null;
-  if (iframeUrl) {
-    const homeHost = new URL(homeUrl).hostname;
-    if (iframeUrl.includes(`${homeHost}/source/`)) {
-      try {
-        const srcHtml = await fetchText(iframeUrl);
-        const pMatch = srcHtml.match(/var _p\s*=\s*"([^"]+)"/);
-        if (pMatch) {
-          const decrypted = kickbdDecrypt(pMatch[1]);
-          const urlMatch = decrypted.match(/window\.player\.load\('([^']+)'\)/);
-          const kidMatch = decrypted.match(/k_id='([^']+)'/);
-          const kvMatch = decrypted.match(/k_v='([^']+)'/);
-          if (urlMatch) {
-            streamData = {
-              stream_url: urlMatch[1],
-              stream_type: urlMatch[1].includes('.mpd') ? 'dash' : 'hls',
-              drm_kid: kidMatch ? kidMatch[1] : null,
-              drm_key: kvMatch ? kvMatch[1] : null
-            };
-          }
-        }
-      } catch (e) { /* skip */ }
-    } else if (iframeUrl.includes('yagaverse.net')) {
-      try {
-        const yHtml = await fetchText(iframeUrl);
-        const sMatch = yHtml.match(/const streamUrl\s*=\s*'([^']+)'/) ||
-          yHtml.match(/source:\s*'([^']+)'/) ||
-          yHtml.match(/file:\s*'([^']+)'/) ||
-          yHtml.match(/https?:\/\/[^"'\s>]+\.m3u8[^"'\s>]*/);
-        if (sMatch) {
-          const url = sMatch[1] || sMatch[0];
-          streamData = { stream_url: url, stream_type: 'hls' };
-        }
-      } catch (e) { /* skip */ }
-    } else if (iframeUrl.includes('soccerball.st')) {
-      try {
-        const sHtml = await fetchText(iframeUrl);
-        const proxyMatch = sHtml.match(/https?:\/\/[^"'<>\s]+s\d+\.php[^"'<>\s]*/);
-        if (proxyMatch) {
-          // Return the s1.php URL directly so the proxy resolves it live
-          streamData = { stream_url: proxyMatch[0], stream_type: 'hls' };
-        }
-      } catch (e) { /* skip */ }
-    } else {
-      // Generic handler for all other iframe types (also covers player/ paths)
-      try {
-        const pHtml = await fetchText(iframeUrl);
-        const urlMatch = pHtml.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
-        if (urlMatch) {
-          streamData = {
-            stream_url: urlMatch[0],
-            stream_type: urlMatch[0].includes('.mpd') ? 'dash' : 'hls'
-          };
-        }
-      } catch (e) { /* skip */ }
-    }
-  }
+  const streamData = iframeUrl ? await extractStreamDataFromIframe(iframeUrl) : null;
 
   return {
     id: ch.id,
@@ -971,6 +967,72 @@ app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
   return c.json(makeResponse(true, {
     matches: live,
     total: live.length,
+    cached_at: new Date().toISOString()
+  }));
+});
+
+// --- Match Channel Extraction ---
+
+async function fetchMatchChannels(matchUrl) {
+  try {
+    const html = await fetchText(matchUrl);
+    const iframeMatches = [...html.matchAll(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/g)];
+    if (iframeMatches.length === 0) return [];
+
+    const streamResults = await Promise.all(iframeMatches.map(m => extractStreamDataFromIframe(m[1])));
+
+    const channels = [];
+    for (let i = 0; i < iframeMatches.length; i++) {
+      const result = streamResults[i];
+      if (!result || !result.stream_url) {
+        channels.push({ name: `Stream ${i + 1}`, stream_type: 'hls', stream_url: null, drm_kid: null, drm_key: null, is_alive: false });
+        continue;
+      }
+      const isDrmDash = !!(result.drm_kid) && result.stream_type === 'dash';
+      let alive = false;
+      try {
+        const resp = await fetch(result.stream_url, {
+          headers: { 'User-Agent': nextUA(), 'Accept': '*/*' },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(5000)
+        });
+        alive = resp.ok || (isDrmDash && resp.status === 403);
+      } catch (e) { /* not alive */ }
+      channels.push({
+        name: `Stream ${i + 1}`,
+        stream_type: result.stream_type || 'hls',
+        stream_url: alive ? result.stream_url : null,
+        drm_kid: result.drm_kid || null,
+        drm_key: result.drm_key || null,
+        is_alive: alive
+      });
+    }
+    return channels;
+  } catch (e) {
+    return [];
+  }
+}
+
+app.get('/api/v2/live', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV2Home(c);
+  const allMatches = await getCachedOrFetch(c, 'kickbd_matches',
+    () => fetchKickbdMatches(homeUrl), 120);
+  const live = allMatches.filter(m => m.is_live);
+  live.sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
+
+  const channelResults = await Promise.all(live.map(m =>
+    getCachedOrFetch(c, `match_channels_${m.id}`,
+      () => fetchMatchChannels(m.match_url), 30)
+  ));
+
+  const items = live.map((match, i) => ({
+    match,
+    channels: channelResults[i] || []
+  }));
+
+  return c.json(makeResponse(true, {
+    matches: items,
+    total: items.length,
     cached_at: new Date().toISOString()
   }));
 });

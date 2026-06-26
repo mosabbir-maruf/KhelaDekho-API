@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime, timezone
 
@@ -7,8 +8,13 @@ import httpx
 import structlog
 
 from app.config import settings
-from app.models.v2 import KickbdMatch, KickbdTeamInfo
+from app.models.v2 import KickbdMatch, KickbdTeamInfo, MatchStream
 from app.services.cache import cache
+from app.services.channels import (
+    _fetch_text,
+    _extract_stream_url,
+    _verify_stream,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -22,16 +28,13 @@ _HOMEPAGE_URL = settings.v2_home_url
 _LIVE_WINDOW_HOURS = 6
 
 _ATTR_RE = re.compile(r'data-link="([^"]+)"')
-
 _FIXTURE_TIME_RE = re.compile(r'data-utc-time="([^"]+)"')
-
 _SPORT_BADGE_RE = re.compile(
     r'<div\s+class="sport-name-badge">\s*'
     r'<span>([^<]*)</span>\s*'
     r'<span\s+class="title-text">\s*([^<]*?)\s*</span>',
     re.DOTALL,
 )
-
 _TEAM_ROW_RE = re.compile(
     r'<div\s+class="fixture-team-row">\s*'
     r'<div\s+class="fixture-logo-box">\s*'
@@ -58,7 +61,6 @@ def _extract_matches_from_html(html: str) -> list[KickbdMatch]:
         if not link_match:
             continue
         match_url = link_match.group(1)
-
         match_slug = match_url.rstrip("/").split("/")[-1]
 
         time_match = _FIXTURE_TIME_RE.search(block)
@@ -123,4 +125,59 @@ async def get_cached_kickbd_matches() -> list[KickbdMatch]:
         identifier="matches",
         factory=fetch_kickbd_matches,
         ttl=120,
+    )
+
+
+_IFRAME_RE = re.compile(r'<iframe[^>]*src=["\']([^"\']+)["\'][^>]*>')
+
+
+async def fetch_match_channels(match_url: str) -> list[MatchStream]:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        html = await _fetch_text(match_url, client)
+        if not html:
+            return []
+
+        iframe_matches = _IFRAME_RE.findall(html)
+        if not iframe_matches:
+            return []
+
+        results = await asyncio.gather(
+            *[_extract_stream_url(url, client) for url in iframe_matches],
+            return_exceptions=True,
+        )
+
+    async with httpx.AsyncClient(timeout=5.0) as verify_client:
+        channels: list[MatchStream] = []
+        for i, result in enumerate(results):
+            if not isinstance(result, dict) or not result.get("stream_url"):
+                channels.append(MatchStream(name=f"Stream {i + 1}", is_alive=False))
+                continue
+
+            stream_url = result["stream_url"]
+            alive = await _verify_stream(
+                stream_url,
+                verify_client,
+                result.get("drm_kid"),
+                result.get("stream_type", "hls"),
+            )
+
+            channels.append(MatchStream(
+                name=f"Stream {i + 1}",
+                stream_type=result.get("stream_type", "hls"),
+                stream_url=stream_url if alive else None,
+                drm_kid=result.get("drm_kid"),
+                drm_key=result.get("drm_key"),
+                is_alive=alive,
+            ))
+
+    logger.info("match_channels_fetched", match_url=match_url, channels=sum(1 for c in channels if c.is_alive))
+    return channels
+
+
+async def get_cached_match_channels(match_url: str) -> list[MatchStream]:
+    return await cache.get_or_set(
+        prefix="match_channels",
+        identifier=match_url,
+        factory=lambda: fetch_match_channels(match_url),
+        ttl=30,
     )
