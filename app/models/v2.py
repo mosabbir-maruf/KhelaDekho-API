@@ -72,14 +72,3 @@ class MatchStream(BaseModel):
     drm_kid: Optional[str] = None
     drm_key: Optional[str] = None
     is_alive: bool = False
-
-
-class LiveMatchWithChannels(BaseModel):
-    match: KickbdMatch
-    channels: list[MatchStream] = Field(default_factory=list)
-
-
-class LiveMatchListResponse(BaseModel):
-    matches: list[LiveMatchWithChannels]
-    total: int
-    cached_at: datetime

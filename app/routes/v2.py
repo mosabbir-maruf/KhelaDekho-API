@@ -19,8 +19,6 @@ from app.models.v2 import (
     HighlightListResponse,
     KickbdMatch,
     KickbdMatchListResponse,
-    LiveMatchListResponse,
-    LiveMatchWithChannels,
 )
 from app.services.channels import (
     get_cached_channel,
@@ -130,34 +128,6 @@ async def list_live_matches():
         data=KickbdMatchListResponse(matches=live, total=len(live), cached_at=cached_at),
     )
 
-
-@router.get(
-    "/live",
-    response_model=StandardResponse[LiveMatchListResponse],
-    dependencies=[Depends(rate_limit)],
-)
-async def list_live_with_channels():
-    matches = await get_cached_kickbd_matches()
-    live = [m for m in matches if m.is_live]
-    live.sort(key=lambda m: m.starts_at or datetime.max.replace(tzinfo=timezone.utc))
-
-    results = await asyncio.gather(
-        *[get_cached_match_channels(m.match_url) for m in live],
-        return_exceptions=True,
-    )
-
-    items = []
-    for match, channels in zip(live, results):
-        if isinstance(channels, Exception):
-            logger.warning("match_channels_fetch_failed", match_id=match.id, error=str(channels))
-            channels = []
-        items.append(LiveMatchWithChannels(match=match, channels=channels))
-
-    cached_at = datetime.now(BDT)
-    return StandardResponse(
-        success=True,
-        data=LiveMatchListResponse(matches=items, total=len(items), cached_at=cached_at),
-    )
 
 
 _PROXY_FORWARD_HEADERS = {

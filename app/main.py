@@ -22,6 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import settings, BDT
 from app.routes import v2 as v2_routes
 from app.routes import v4 as v4_routes
+from app.routes import goal_scores as goal_scores_routes
 from app.models import (
     Match,
     MatchListResponse,
@@ -91,6 +92,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 app.include_router(v2_routes.router)
 app.include_router(v4_routes.router)
+app.include_router(goal_scores_routes.router)
 
 @app.middleware("http")
 async def add_rate_limit_headers(request: Request, call_next):
