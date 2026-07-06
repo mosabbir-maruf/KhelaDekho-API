@@ -788,9 +788,36 @@ function channelKey(name, server) {
 
 async function fetchKickbdMatches(homeUrl) {
   const html = await fetchText(homeUrl, { Referer: `${homeUrl}/` });
-  const raw = extractJsonAfter(unescapeFlight(html), 'matches', '[', ']') || [];
+  const unescaped = unescapeFlight(html);
+  
+  // 1. Try to extract matches from data fixture objects (home-fixture-grid) in the Next.js RSC payload
+  // which contains all matches shown in the grid.
+  const raw = [];
+  const matchesRegex = /"data":(\{"id":\d+,"match_name":.+?,"match_category_id":\d+\})/g;
+  let match;
+  while ((match = matchesRegex.exec(unescaped)) !== null) {
+    try {
+      const item = JSON.parse(match[1]);
+      if (item.slug && !raw.some(r => r.slug === item.slug)) {
+        raw.push(item);
+      }
+    } catch {
+      continue;
+    }
+  }
+  
+  // 2. Fallback to the "matches" array if grid objects aren't found
+  if (raw.length === 0) {
+    const fallback = extractJsonAfter(unescaped, 'matches', '[', ']') || [];
+    for (const m of fallback) {
+      if (m && m.slug && !raw.some(r => r.slug === m.slug)) {
+        raw.push(m);
+      }
+    }
+  }
+
   const now = Date.now();
-  return raw.filter(m => m && m.slug).map(m => {
+  return raw.map(m => {
     const start = m.match_start_date ? Date.parse(m.match_start_date) : 0;
     const end = m.match_end_date ? Date.parse(m.match_end_date) : 0;
     const isLive = (m.match_status || '').toLowerCase() === 'live' || (!!start && !!end && start <= now && now < end);

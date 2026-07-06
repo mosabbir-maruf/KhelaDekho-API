@@ -123,12 +123,35 @@ async def fetch_matches() -> list[KickbdMatch]:
         html = await _fetch_text(_HOME, client)
     if not html:
         return []
-    raw = _extract_json_after(_unescape_flight(html), "matches", "[", "]") or []
+    unescaped = _unescape_flight(html)
+    
+    # 1. Try to extract matches from data fixture objects (home-fixture-grid) in the Next.js RSC payload
+    # which contains all matches shown in the grid.
+    import re
+    raw = []
+    # Find all "data":{"id":X,...} objects
+    for m in re.finditer(r'"data":(\{"id":\d+,"match_name":.+?"match_category_id":\d+\})', unescaped):
+        try:
+            item = json.loads(m.group(1))
+            if item.get("slug") and item not in raw:
+                raw.append(item)
+        except Exception:
+            continue
+            
+    # 2. Fallback to the "matches" array if grid objects aren'\''t found
+    if not raw:
+        raw = _extract_json_after(unescaped, "matches", "[", "]") or []
+        
     now = datetime.now(tz=timezone.utc)
     out: list[KickbdMatch] = []
+    seen_slugs = set()
     for m in raw:
         if not isinstance(m, dict) or not m.get("slug"):
             continue
+        slug = m["slug"]
+        if slug in seen_slugs:
+            continue
+        seen_slugs.add(slug)
         is_live = str(m.get("match_status", "")).lower() == "live"
         if not is_live:
             try:
