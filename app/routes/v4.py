@@ -17,7 +17,7 @@ from app.models.v4 import (
     ProxybdixStatsResponse,
     ProxybdixStreamResponse,
 )
-from app.services.proxybdix import (
+from app.services.v4 import (
     get_cached_channel,
     get_cached_channels,
     get_cached_user_count,
