@@ -16,7 +16,10 @@ from app.services.cache import cache
 
 logger = structlog.get_logger(__name__)
 
-_HOME = settings.v5_home_url.rstrip("/") if settings.v5_home_url else "https://dami-tv.pro"
+if not settings.v5_home_url:
+    raise ValueError("KHELADEKHO_V5_HOME_URL setting is required")
+
+_HOME = settings.v5_home_url.rstrip("/")
 _API_BASE = f"{_HOME}/papi"
 
 _SCRAPE_HEADERS = {

@@ -26,8 +26,11 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v5")
 rate_limit = APIRateLimiter(requests=100, window=60)
 
+if not settings.v5_home_url:
+    raise ValueError("KHELADEKHO_V5_HOME_URL setting is required")
+
+_HOME = settings.v5_home_url.rstrip("/")
 _PROXY_BASE = "/api/v5/proxy?url="
-_HOME = settings.v5_home_url.rstrip("/") if settings.v5_home_url else "https://dami-tv.pro"
 
 
 @router.get(
