@@ -343,7 +343,8 @@ app.get('/api/v1/health', rateLimiterMiddleware(100, 60), (c) => {
 
 app.get('/api/v1/scores', rateLimiterMiddleware(60, 60), async (c) => {
   const date = validDate(c);
-  let data = await getCachedOrFetch(c, scoresCacheKey(date), () => fetchGoalScores(c, date), 15);
+  const ttl = date ? 300 : 5;
+  let data = await getCachedOrFetch(c, scoresCacheKey(date), () => fetchGoalScores(c, date), ttl);
 
   const competition = c.req.query('competition');
   const statusQ = c.req.query('status');
@@ -362,7 +363,8 @@ app.get('/api/v1/scores', rateLimiterMiddleware(60, 60), async (c) => {
 
 app.get('/api/v1/competitions', rateLimiterMiddleware(60, 60), async (c) => {
   const date = validDate(c);
-  const data = await getCachedOrFetch(c, scoresCacheKey(date), () => fetchGoalScores(c, date), 15);
+  const cttl = date ? 300 : 5;
+  const data = await getCachedOrFetch(c, scoresCacheKey(date), () => fetchGoalScores(c, date), cttl);
   const comps = data.competitions.map(comp => ({
     id: comp.id, name: comp.name, area: comp.area, image_url: comp.image_url, match_count: comp.matches.length,
   }));
