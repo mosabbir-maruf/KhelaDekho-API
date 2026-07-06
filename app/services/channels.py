@@ -99,21 +99,21 @@ def _decrypt_source(payload_urlenc: str) -> str:
 
 def _parse_source_js(html: str) -> dict | None:
     m = re.search(r'var _p\s*=\s*"([^"]+)"', html)
-    if not m:
-        return None
-    decrypted = _decrypt_source(m.group(1))
-    url_match = re.search(r"window\.player\.load\('([^']+)'\)", decrypted)
-    if not url_match:
-        return None
-    url = url_match.group(1)
-    result = {"stream_url": url, "stream_type": "dash" if ".mpd" in url else "hls"}
-    kid = re.search(r"k_id='([^']+)'", decrypted)
-    kv = re.search(r"k_v='([^']+)'", decrypted)
-    if kid:
-        result["drm_kid"] = kid.group(1)
-    if kv:
-        result["drm_key"] = kv.group(1)
-    return result
+    if m:
+        decrypted = _decrypt_source(m.group(1))
+        url_match = re.search(r"window\.player\.load\('([^']+)'\)", decrypted)
+        if url_match:
+            url = url_match.group(1)
+            result = {"stream_url": url, "stream_type": "dash" if ".mpd" in url else "hls"}
+            kid = re.search(r"k_id='([^']+)'", decrypted)
+            kv = re.search(r"k_v='([^']+)'", decrypted)
+            if kid:
+                result["drm_kid"] = kid.group(1)
+            if kv:
+                result["drm_key"] = kv.group(1)
+            return result
+    # Fall through to generic scraping (some /source/ pages embed streamUrl directly)
+    return _extract_stream_from_html(html)
 
 
 # --- Matches ---
@@ -220,28 +220,53 @@ def public_channels(raw: list[dict]) -> list[MatchChannel]:
 
 # --- Stream resolution ---
 
+_STREAM_URL_PATTERNS = [
+    re.compile(r"const\s+(?:streamUrl|sourceUrl)\s*=\s*['\"]([^'\"]+)['\"]"),
+    re.compile(r"(?:source|file)\s*:\s*['\"]([^'\"]+\.(?:m3u8|mpd)[^'\"]*)['\"]"),
+    re.compile(r"https?://[^\"'<>\s]+\.(?:m3u8|mpd)[^\"'<>\s]*"),
+]
+
+
+def _extract_stream_from_html(html: str) -> dict | None:
+    url = None
+    for pat in _STREAM_URL_PATTERNS:
+        m = pat.search(html)
+        if m:
+            url = (m.group(1) or m.group(0)).replace("\\/", "/")
+            break
+    if not url:
+        return None
+    result = {"stream_url": url, "stream_type": "dash" if ".mpd" in url else "hls"}
+    # Try kickbd-style DRM keys (k_id / k_v)
+    kid = re.search(r"k_id['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
+    kv = re.search(r"k_v['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
+    if kid and kv:
+        result["drm_kid"] = kid.group(1)
+        result["drm_key"] = kv.group(1)
+    else:
+        # Fallback: Shaka clearKeys format: "kid": "key"
+        ck = re.search(r'clearKeys\s*:\s*\{[^}]*"\s*([^"]+)"\s*:\s*"([^"]+)"', html)
+        if ck:
+            result["drm_kid"] = ck.group(1)
+            result["drm_key"] = ck.group(2)
+    return result
+
+
 async def resolve_stream(source_url: str) -> dict | None:
+    # Direct manifest URL – use as-is
+    if re.search(r"\.(m3u8|mpd)(\?|$)", source_url, re.IGNORECASE):
+        return {"stream_url": source_url, "stream_type": "dash" if ".mpd" in source_url else "hls"}
+
     async with httpx.AsyncClient(timeout=12.0) as client:
         html = await _fetch_text(source_url, client)
     if not html:
         return None
     if "/source/" in source_url:
-        return _parse_source_js(html)
-    # Generic player page: find an embedded HLS/DASH URL + optional DRM.
-    m = (re.search(r"const streamUrl\s*=\s*['\"]([^'\"]+)['\"]", html)
-         or re.search(r"(?:source|file)\s*:\s*['\"]([^'\"]+\.(?:m3u8|mpd)[^'\"]*)['\"]", html)
-         or re.search(r"https?://[^\"'<>\s]+\.(?:m3u8|mpd)[^\"'<>\s]*", html))
-    if not m:
-        return None
-    url = m.group(1) if m.lastindex else m.group(0)
-    result = {"stream_url": url, "stream_type": "dash" if ".mpd" in url else "hls"}
-    kid = re.search(r"k_id['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
-    kv = re.search(r"k_v['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
-    if kid:
-        result["drm_kid"] = kid.group(1)
-    if kv:
-        result["drm_key"] = kv.group(1)
-    return result
+        result = _parse_source_js(html)
+        if result:
+            return result
+        # Fall through to generic scraping
+    return _extract_stream_from_html(html)
 
 
 async def get_cached_stream(slug: str, ch_id: str, source_url: str) -> dict | None:
