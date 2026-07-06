@@ -1270,9 +1270,9 @@ app.get('/api/v5/matches/:slug/stream', rateLimiterMiddleware(100, 60), async (c
   if (!stream || !stream.stream_url) return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
 
   let streamUrl = stream.stream_url;
-  if (needsProxy(streamUrl, c)) {
-    streamUrl = `/api/v5/proxy?url=${encodeURIComponent(streamUrl)}`;
-  }
+  // Proxy all v5 streams — TV playlists need Referer headers, substreams have
+  // expiring tokens. The proxy fetches the manifest fresh and rewrites URLs.
+  streamUrl = `/api/v5/proxy?url=${encodeURIComponent(streamUrl)}`;
 
   return c.json(makeResponse(true, {
     name: channel.name,
