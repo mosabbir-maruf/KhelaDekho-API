@@ -896,7 +896,7 @@ app.get('/api/v2/matches/:slug/stream', rateLimiterMiddleware(100, 60), async (c
   }));
 });
 
-app.get('/api/v2/proxy', rateLimiterMiddleware(600, 60), async (c) => {
+app.get('/api/v2/proxy', async (c) => {
   const url = c.req.query('url');
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
   const source = c.req.query('source') || 'v2';
@@ -1048,7 +1048,7 @@ app.get('/api/v4/channels/:channel_id/stream', rateLimiterMiddleware(100, 60), a
   }));
 });
 
-app.get('/api/v4/proxy', rateLimiterMiddleware(600, 60), async (c) => {
+app.get('/api/v4/proxy', async (c) => {
   const url = c.req.query('url');
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
   const homeUrl = getV4Home(c);
@@ -1283,7 +1283,7 @@ app.get('/api/v5/matches/:slug/stream', rateLimiterMiddleware(100, 60), async (c
   }));
 });
 
-app.get('/api/v5/proxy', rateLimiterMiddleware(600, 60), async (c) => {
+app.get('/api/v5/proxy', async (c) => {
   const url = c.req.query('url');
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
 
