@@ -138,22 +138,6 @@ async function fetchJson(url) {
   return res.json();
 }
 
-// Concurrent batch processor
-async function concurrentMap(items, fn, concurrency = 5) {
-  const results = [];
-  const queue = [...items];
-  async function worker() {
-    while (queue.length > 0) {
-      const item = queue.shift();
-      results.push(await fn(item));
-    }
-  }
-  const count = Math.min(concurrency, items.length);
-  if (count === 0) return results;
-  await Promise.all(Array.from({ length: count }, () => worker()));
-  return results;
-}
-
 // Unified cache helper with stale-while-revalidate + stampede protection
 const fetchPromises = new Map();
 async function getCachedOrFetch(c, key, fetchFn, ttl) {
@@ -708,7 +692,7 @@ app.get('/', rateLimiterMiddleware(100, 60), (c) => c.json(makeResponse(true, {
   endpoints: {
     health: '/api/v1/health',
     scores: '/api/v1/scores',
-    channels_v2: '/api/v2/channels',
+    matches_v2: '/api/v2/matches',
     channels_v4: '/api/v4/channels',
   }
 })));
@@ -734,10 +718,14 @@ function kickbdDecrypt(payloadUrlEnc) {
   return r;
 }
 
-async function extractStreamDataFromIframe(iframeUrl) {
-  if (iframeUrl.includes('/source/')) {
+// Resolve a single channel "source" URL to a playable stream + DRM.
+// kickbd /source/ pages carry an encrypted `var _p`; other hosts embed a
+// plain HLS/DASH URL. Referer/Origin are required by the source hosts.
+async function resolveStream(sourceUrl, homeUrl) {
+  const headers = homeUrl ? { Referer: `${homeUrl}/`, Origin: homeUrl } : {};
+  if (sourceUrl.includes('/source/')) {
     try {
-      const srcHtml = await fetchText(iframeUrl);
+      const srcHtml = await fetchText(sourceUrl, headers);
       const pMatch = srcHtml.match(/var _p\s*=\s*"([^"]+)"/);
       if (!pMatch) return null;
       const decrypted = kickbdDecrypt(pMatch[1]);
@@ -749,204 +737,130 @@ async function extractStreamDataFromIframe(iframeUrl) {
       if (kidMatch) result.drm_kid = kidMatch[1];
       if (kvMatch) result.drm_key = kvMatch[1];
       return result;
-    } catch (e) { return null; }
-  }
-  if (iframeUrl.includes('yagaverse.net')) {
-    try {
-      const yHtml = await fetchText(iframeUrl);
-      const sMatch = yHtml.match(/const streamUrl\s*=\s*'([^']+)'/) ||
-        yHtml.match(/source:\s*'([^']+)'/) ||
-        yHtml.match(/file:\s*'([^']+)'/) ||
-        yHtml.match(/https?:\/\/[^"'\s>]+\.m3u8[^"'\s>]*/);
-      if (sMatch) {
-        const url = sMatch[1] || sMatch[0];
-        return { stream_url: url, stream_type: 'hls' };
-      }
-    } catch (e) { /* skip */ }
-    return null;
-  }
-  if (iframeUrl.includes('soccerball.st')) {
-    try {
-      const sHtml = await fetchText(iframeUrl);
-      const proxyMatch = sHtml.match(/https?:\/\/[^"'<>\s]+s\d+\.php[^"'<>\s]*/);
-      if (proxyMatch) return { stream_url: proxyMatch[0], stream_type: 'hls' };
-    } catch (e) { /* skip */ }
-    return null;
+    } catch { return null; }
   }
   try {
-    const pHtml = await fetchText(iframeUrl);
-    const urlMatch = pHtml.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
-    if (!urlMatch) return null;
-    const result = { stream_url: urlMatch[0], stream_type: urlMatch[0].includes('.mpd') ? 'dash' : 'hls' };
-    const kidMatch = pHtml.match(/k_id['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
-    const kvMatch = pHtml.match(/k_v['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
+    const html = await fetchText(sourceUrl, headers);
+    const sMatch = html.match(/const streamUrl\s*=\s*['"]([^'"]+)['"]/) ||
+      html.match(/(?:source|file)\s*:\s*['"]([^'"]+\.(?:m3u8|mpd)[^'"]*)['"]/) ||
+      html.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
+    if (!sMatch) return null;
+    const url = sMatch[1] || sMatch[0];
+    const result = { stream_url: url, stream_type: url.includes('.mpd') ? 'dash' : 'hls' };
+    const kidMatch = html.match(/k_id['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
+    const kvMatch = html.match(/k_v['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
     if (kidMatch) result.drm_kid = kidMatch[1];
     if (kvMatch) result.drm_key = kvMatch[1];
     return result;
-  } catch (e) { return null; }
+  } catch { return null; }
 }
 
-async function processChannel(ch, homeUrl) {
-  let iframeUrl = null;
-  try {
-    const watchHtml = await fetchText(`${homeUrl}/watch/${ch.id}`);
-    const iframeMatch = watchHtml.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/);
-    if (iframeMatch) iframeUrl = iframeMatch[1];
-  } catch (e) { /* skip */ }
-
-  const streamData = iframeUrl ? await extractStreamDataFromIframe(iframeUrl) : null;
-  return {
-    id: ch.id,
-    name: ch.name,
-    logo: ch.logo,
-    stream_type: streamData ? streamData.stream_type : 'hls',
-    stream_url: streamData ? streamData.stream_url : null,
-    drm_kid: streamData ? (streamData.drm_kid || null) : null,
-    drm_key: streamData ? (streamData.drm_key || null) : null,
-    is_alive: !!streamData,
-    cached_at: new Date().toISOString()
-  };
+// RSC flight data escapes quotes; unescape to parse embedded JSON.
+function unescapeFlight(s) {
+  return s.replace(/\\"/g, '"').replace(/\\\\/g, '\\');
 }
 
-async function fetchKickbdChannels(homeUrl) {
-  const html = await fetchText(homeUrl);
-  const seen = new Set();
-  const channels = [];
-  const watchRegex = /<a[^>]*href="[^"]*\/watch\/(\d+)"[^>]*>[\s\S]*?<img[^>]*src="([^"]*)"[^>]*alt="([^"]*)"[^>]*>/g;
-  let m;
-  while ((m = watchRegex.exec(html)) !== null) {
-    const id = parseInt(m[1], 10);
-    if (seen.has(id)) continue;
-    seen.add(id);
-    const rawName = m[3].trim() || 'Channel ' + id;
-    const name = rawName.replace(/^KickBD\s+/i, '');
-    channels.push({ id, name, logo: m[2] || null });
-  }
-  return await concurrentMap(channels, ch => processChannel(ch, homeUrl), 9);
-}
-
-async function processHighlight(slug, homeUrl) {
-  let detail = { slug, title: slug, stream_url: null, sources: [], is_alive: false };
-  try {
-    const detailHtml = await fetchText(`${homeUrl}/highlights/${slug}`);
-    const titleMatch = detailHtml.match(/<title[^>]*>(.*?)<\/title>/);
-    if (titleMatch) detail.title = titleMatch[1].replace(/\s*\|\|.*/, '').trim();
-    const iframeMatch = detailHtml.match(/<iframe[^>]*src=["']([^"']+)["'][^>]*>/);
-    if (iframeMatch) {
-      const streamUrl = iframeMatch[1];
-      const cdnHost = `cdn.${new URL(homeUrl).hostname}`;
-      if (streamUrl.includes(`${cdnHost}/stream.php`)) {
-        try {
-          const innerHtml = await fetchText(streamUrl);
-          const payloadMatch = innerHtml.match(/securePayload\s*=\s*"([^"]+)"/);
-          if (payloadMatch) {
-            const decodedUrl = atob(payloadMatch[1]);
-            const playerHtml = await fetchText(decodedUrl);
-            const sourcesRaw = [...playerHtml.matchAll(/\{"label":"([^"]+)","type":"[^"]+","file":"([^"]+)"[^}]*\}/g)];
-            if (sourcesRaw.length > 0) {
-              detail.sources = sourcesRaw.map(sr => ({ label: sr[1], url: sr[2] }));
-              detail.stream_url = sourcesRaw[0][2];
-              detail.is_alive = true;
-            }
-          }
-        } catch (e) { /* expired or unavailable */ }
-      } else {
-        detail.stream_url = streamUrl;
-        detail.is_alive = true;
-      }
+// Extract a balanced JSON value that follows `"key":<open>` in text.
+function extractJsonAfter(text, key, openCh, closeCh) {
+  const marker = `"${key}":${openCh}`;
+  const idx = text.indexOf(marker);
+  if (idx < 0) return null;
+  const start = idx + marker.length - 1;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (esc) { esc = false; continue; }
+    if (ch === '\\') { esc = true; continue; }
+    if (ch === '"') { inStr = !inStr; continue; }
+    if (inStr) continue;
+    if (ch === openCh) depth++;
+    else if (ch === closeCh) {
+      depth--;
+      if (depth === 0) { try { return JSON.parse(text.slice(start, i + 1)); } catch { return null; } }
     }
-  } catch (e) { /* skip */ }
-  return detail;
+  }
+  return null;
 }
 
-async function fetchKickbdHighlights(homeUrl) {
-  const html = await fetchText(homeUrl);
-  const slugSet = new Set();
-  const escapedHome = homeUrl.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const slugRegex = new RegExp(`href=["']${escapedHome}/highlights/([^"']+)["'][^>]*>`, 'g');
-  let m;
-  while ((m = slugRegex.exec(html)) !== null) slugSet.add(m[1]);
-  return await concurrentMap([...slugSet], s => processHighlight(s, homeUrl), 5);
+function channelKey(name, server) {
+  return `${name}__${server}`.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
-
-function proxyStreamUrl(url) {
-  if (!url) return null;
-  return `/api/v2/proxy?url=${encodeURIComponent(url)}`;
-}
-
-app.get('/api/v2/channels', rateLimiterMiddleware(100, 60), async (c) => {
-  const homeUrl = getV2Home(c);
-  const channels = await getCachedOrFetch(c, 'kickbd_channels_v3', () => fetchKickbdChannels(homeUrl), 1800);
-  const q = c.req.query('q');
-  const aliveOnly = c.req.query('alive') === 'true';
-  let filtered = channels;
-  if (aliveOnly) filtered = filtered.filter(ch => ch.is_alive);
-  if (q) { const query = q.toLowerCase(); filtered = filtered.filter(ch => ch.name.toLowerCase().includes(query)); }
-  const proxied = filtered.map(ch => ({ ...ch, stream_url: proxyStreamUrl(ch.stream_url) }));
-  return c.json(makeResponse(true, { channels: proxied, total: proxied.length, cached_at: new Date().toISOString() }));
-});
-
-app.get('/api/v2/channels/:channel_id', rateLimiterMiddleware(100, 60), async (c) => {
-  const homeUrl = getV2Home(c);
-  const channels = await getCachedOrFetch(c, 'kickbd_channels_v3', () => fetchKickbdChannels(homeUrl), 1800);
-  const channelId = parseInt(c.req.param('channel_id'), 10);
-  const channel = channels.find(ch => ch.id === channelId);
-  if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
-  return c.json(makeResponse(true, { ...channel, stream_url: proxyStreamUrl(channel.stream_url) }));
-});
-
-app.get('/api/v2/highlights', rateLimiterMiddleware(100, 60), async (c) => {
-  const homeUrl = getV2Home(c);
-  const highlights = await getCachedOrFetch(c, 'kickbd_highlights', () => fetchKickbdHighlights(homeUrl), 1800);
-  return c.json(makeResponse(true, { highlights, total: highlights.length, cached_at: new Date().toISOString() }));
-});
-
-app.get('/api/v2/highlights/:slug', rateLimiterMiddleware(100, 60), async (c) => {
-  const homeUrl = getV2Home(c);
-  const highlights = await getCachedOrFetch(c, 'kickbd_highlights', () => fetchKickbdHighlights(homeUrl), 1800);
-  const slug = c.req.param('slug');
-  const highlight = highlights.find(h => h.slug === slug);
-  if (!highlight) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Highlight not found' }), 404);
-  return c.json(makeResponse(true, highlight));
-});
 
 async function fetchKickbdMatches(homeUrl) {
-  const html = await fetchText(homeUrl);
-  const matches = [];
+  const html = await fetchText(homeUrl, { Referer: `${homeUrl}/` });
+  const raw = extractJsonAfter(unescapeFlight(html), 'matches', '[', ']') || [];
   const now = Date.now();
-  const blocks = html.split(/<div\s+class="event-card"/);
-  for (let i = 1; i < blocks.length; i++) {
-    const chunk = blocks[i];
-    const linkMatch = chunk.match(/data-link="([^"]+)"/);
-    const timeMatch = chunk.match(/data-utc-time="([^"]+)"/);
-    if (!linkMatch || !timeMatch) continue;
-    const matchUrl = linkMatch[1];
-    const startsAt = new Date(timeMatch[1]);
-    if (isNaN(startsAt.getTime())) continue;
-    const matchSlug = matchUrl.split('/').pop();
-    const badgeMatch = chunk.match(/<div\s+class="sport-name-badge">\s*<span>([^<]*)<\/span>\s*<span\s+class="title-text">\s*([^<]*?)\s*<\/span>/);
-    let sportEmoji = '', league = '';
-    if (badgeMatch) { sportEmoji = badgeMatch[1].trim(); league = badgeMatch[2].trim(); }
-    const teamRows = [...chunk.matchAll(/<div\s+class="fixture-team-row">\s*<div\s+class="fixture-logo-box">\s*<img\s+src="([^"]+)"\s+alt="([^"]+)"/g)];
-    if (teamRows.length < 2) continue;
-    const expireTime = startsAt.getTime() + 6 * 3600 * 1000;
-    const isLive = startsAt.getTime() <= now && now < expireTime;
-    matches.push({
-      id: matchSlug, league, sport_emoji: sportEmoji,
-      team_a: { name: teamRows[0][2].trim(), logo: teamRows[0][1] || null },
-      team_b: { name: teamRows[1][2].trim(), logo: teamRows[1][1] || null },
-      starts_at: startsAt.toISOString(), match_url: matchUrl, is_live: isLive, cached_at: new Date().toISOString()
-    });
-  }
-  return matches;
+  return raw.filter(m => m && m.slug).map(m => {
+    const start = m.match_start_date ? Date.parse(m.match_start_date) : 0;
+    const end = m.match_end_date ? Date.parse(m.match_end_date) : 0;
+    const isLive = (m.match_status || '').toLowerCase() === 'live' || (!!start && !!end && start <= now && now < end);
+    return {
+      id: m.slug,
+      slug: m.slug,
+      name: (m.match_name || '').trim(),
+      sport: (m.sport_name || '').trim(),
+      status: m.match_status || '',
+      is_live: isLive,
+      start_date: m.match_start_date || null,
+      end_date: m.match_end_date || null,
+      poster: m.slider_image || null,
+      team_a: m.team1 ? { name: (m.team1.name || '').trim(), logo: m.team1.logo || null } : null,
+      team_b: m.team2 ? { name: (m.team2.name || '').trim(), logo: m.team2.logo || null } : null,
+      cached_at: new Date().toISOString(),
+    };
+  });
 }
 
-app.get('/api/v2/matches/live', rateLimiterMiddleware(100, 60), async (c) => {
+async function fetchMatchChannels(homeUrl, slug) {
+  const html = await fetchText(`${homeUrl}/matches/iframe/${encodeURIComponent(slug)}`, { Referer: `${homeUrl}/` });
+  const map = extractJsonAfter(unescapeFlight(html), 'channels', '{', '}') || {};
+  const channels = [];
+  for (const [rawName, servers] of Object.entries(map)) {
+    if (!servers || typeof servers !== 'object') continue;
+    // Strip a leading "KickBD" provider prefix (e.g. "KickBD Edge" -> "Edge").
+    const name = rawName.replace(/^kickbd\s+/i, '').trim() || rawName.trim();
+    for (const [server, info] of Object.entries(servers)) {
+      if (info && info.url) channels.push({ id: channelKey(name, server), name, server, source_url: info.url });
+    }
+  }
+  return channels;
+}
+
+// List matches (from the homepage payload). ?live=true filters to live only.
+app.get('/api/v2/matches', rateLimiterMiddleware(100, 60), async (c) => {
   const homeUrl = getV2Home(c);
-  const allMatches = await getCachedOrFetch(c, 'kickbd_matches', () => fetchKickbdMatches(homeUrl), 120);
-  const live = allMatches.filter(m => m.is_live);
-  live.sort((a, b) => new Date(a.starts_at) - new Date(b.starts_at));
-  return c.json(makeResponse(true, { matches: live, total: live.length, cached_at: new Date().toISOString() }));
+  const matches = await getCachedOrFetch(c, 'kickbd_matches_v4', () => fetchKickbdMatches(homeUrl), 60);
+  const list = c.req.query('live') === 'true' ? matches.filter(m => m.is_live) : matches;
+  return c.json(makeResponse(true, { matches: list, total: list.length, cached_at: new Date().toISOString() }));
+});
+
+// Channel list for a match (no stream resolution — that happens on demand).
+app.get('/api/v2/matches/:slug/channels', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV2Home(c);
+  const slug = c.req.param('slug');
+  const channels = await getCachedOrFetch(c, `kickbd_mc_${slug}`, () => fetchMatchChannels(homeUrl, slug), 120);
+  const safe = channels.map(({ id, name, server }) => ({ id, name, server }));
+  return c.json(makeResponse(true, { slug, channels: safe, total: safe.length, cached_at: new Date().toISOString() }));
+});
+
+// Resolve one channel's stream on demand (source_url is looked up server-side).
+app.get('/api/v2/matches/:slug/stream', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV2Home(c);
+  const slug = c.req.param('slug');
+  const chId = c.req.query('ch');
+  if (!chId) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'ch parameter required' }), 400);
+  const channels = await getCachedOrFetch(c, `kickbd_mc_${slug}`, () => fetchMatchChannels(homeUrl, slug), 120);
+  const channel = channels.find(ch => ch.id === chId);
+  if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
+  const stream = await getCachedOrFetch(c, `kickbd_st_${slug}_${chId}`, () => resolveStream(channel.source_url, homeUrl), 45);
+  if (!stream || !stream.stream_url) return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
+  return c.json(makeResponse(true, {
+    name: channel.name,
+    stream_url: `/api/v2/proxy?url=${encodeURIComponent(stream.stream_url)}`,
+    stream_type: stream.stream_type,
+    drm_kid: stream.drm_kid || null,
+    drm_key: stream.drm_key || null,
+  }));
 });
 
 app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {

@@ -1,6 +1,13 @@
+"""V2 (kickbd) — match-centric scraping.
+
+The upstream is a Next.js app; match/channel data lives in the server-rendered
+RSC payload. Flow: homepage -> matches[]; /matches/iframe/{slug} -> channels{};
+each channel's /source/ page carries an encrypted `var _p` that decrypts to the
+playable stream URL + ClearKey DRM.
+"""
 from __future__ import annotations
 
-import asyncio
+import json
 import re
 import urllib.parse
 from datetime import datetime, timezone
@@ -8,413 +15,214 @@ from datetime import datetime, timezone
 import httpx
 import structlog
 
-from urllib.parse import urlparse
-
 from app.config import settings
-from app.models.v2 import Channel, Highlight
+from app.models.v2 import KickbdMatch, MatchChannel, TeamInfo
 from app.services.cache import cache
 
 logger = structlog.get_logger(__name__)
 
-_HOMEPAGE_URL = settings.v2_home_url
-_HOME_NETLOC = urlparse(_HOMEPAGE_URL).netloc
-_CDN_NETLOC = f"cdn.{_HOME_NETLOC}"
+_HOME = settings.v2_home_url.rstrip("/")
+_DECRYPT_KEY = "999999859198"
 
 _SCRAPE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15",
+    "User-Agent": settings.user_agent,
     "Accept": "*/*",
     "Accept-Language": "en-US,en;q=0.9",
 }
 
-_DECRYPT_KEY = "999999859198"
 
-_WATCH_RE = re.compile(
-    rf'href=["\']{re.escape(_HOMEPAGE_URL)}/watch/(\d+)["\'][^>]*>.*?'
-    rf'<img[^>]*src=["\']([^"\']+)["\'][^>]*alt=["\']([^"\']+)["\']',
-    re.DOTALL,
-)
-_HIGHLIGHT_RE = re.compile(
-    rf'href=["\']{re.escape(_HOMEPAGE_URL)}/highlights/([^"\']+)["\'][^>]*>',
-)
+async def _fetch_text(url: str, client: httpx.AsyncClient) -> str | None:
+    try:
+        resp = await client.get(
+            url,
+            headers={**_SCRAPE_HEADERS, "Referer": f"{_HOME}/", "Origin": _HOME},
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        return resp.text
+    except Exception as e:
+        logger.warning("v2_fetch_failed", url=url, error=str(e))
+        return None
+
+
+def _unescape_flight(s: str) -> str:
+    return s.replace('\\"', '"').replace('\\\\', '\\')
+
+
+def _extract_json_after(text: str, key: str, open_ch: str, close_ch: str):
+    """Return the balanced JSON value that follows `"key":<open>` in text."""
+    marker = f'"{key}":{open_ch}'
+    idx = text.find(marker)
+    if idx < 0:
+        return None
+    start = idx + len(marker) - 1
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        c = text[i]
+        if esc:
+            esc = False
+            continue
+        if c == "\\":
+            esc = True
+            continue
+        if c == '"':
+            in_str = not in_str
+            continue
+        if in_str:
+            continue
+        if c == open_ch:
+            depth += 1
+        elif c == close_ch:
+            depth -= 1
+            if depth == 0:
+                try:
+                    return json.loads(text[start:i + 1])
+                except Exception:
+                    return None
+    return None
+
+
+def _channel_key(name: str, server: str) -> str:
+    raw = f"{name}__{server}".lower()
+    return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", raw))
 
 
 def _decrypt_source(payload_urlenc: str) -> str:
     decoded = urllib.parse.unquote(payload_urlenc)
-    r = ""
-    for i, ch in enumerate(decoded):
-        r += chr((ord(ch) + 5) ^ int(_DECRYPT_KEY[i % len(_DECRYPT_KEY)]))
-    return r
-
-
-def _detect_stream_type(url: str) -> str:
-    if ".mpd" in url:
-        return "dash"
-    return "hls"
+    return "".join(
+        chr((ord(ch) + 5) ^ int(_DECRYPT_KEY[i % len(_DECRYPT_KEY)]))
+        for i, ch in enumerate(decoded)
+    )
 
 
 def _parse_source_js(html: str) -> dict | None:
-    match = re.search(r'var _p\s*=\s*"([^"]+)"', html)
-    if not match:
+    m = re.search(r'var _p\s*=\s*"([^"]+)"', html)
+    if not m:
         return None
-    decrypted = _decrypt_source(match.group(1))
+    decrypted = _decrypt_source(m.group(1))
     url_match = re.search(r"window\.player\.load\('([^']+)'\)", decrypted)
-    kid_match = re.search(r"k_id='([^']+)'", decrypted)
-    kv_match = re.search(r"k_v='([^']+)'", decrypted)
     if not url_match:
         return None
-    result = {
-        "stream_url": url_match.group(1),
-        "stream_type": _detect_stream_type(url_match.group(1)),
-    }
-    if kid_match:
-        result["drm_kid"] = kid_match.group(1)
-    if kv_match:
-        result["drm_key"] = kv_match.group(1)
+    url = url_match.group(1)
+    result = {"stream_url": url, "stream_type": "dash" if ".mpd" in url else "hls"}
+    kid = re.search(r"k_id='([^']+)'", decrypted)
+    kv = re.search(r"k_v='([^']+)'", decrypted)
+    if kid:
+        result["drm_kid"] = kid.group(1)
+    if kv:
+        result["drm_key"] = kv.group(1)
     return result
 
 
-async def _fetch_text(url: str, client: httpx.AsyncClient | None = None) -> str | None:
-    close_client = client is None
-    if client is None:
-        client = httpx.AsyncClient(timeout=10.0)
-    try:
-        resp = await client.get(url, headers=_SCRAPE_HEADERS, follow_redirects=True)
-        resp.raise_for_status()
-        return resp.text
-    except Exception as e:
-        logger.warning("tv_fetch_failed", url=url, error=str(e))
-        return None
-    finally:
-        if close_client:
-            await client.aclose()
+# --- Matches ---
 
-
-async def _extract_channel_list() -> list[dict]:
-    html = await _fetch_text(_HOMEPAGE_URL)
+async def fetch_matches() -> list[KickbdMatch]:
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        html = await _fetch_text(_HOME, client)
     if not html:
         return []
+    raw = _extract_json_after(_unescape_flight(html), "matches", "[", "]") or []
+    now = datetime.now(tz=timezone.utc)
+    out: list[KickbdMatch] = []
+    for m in raw:
+        if not isinstance(m, dict) or not m.get("slug"):
+            continue
+        is_live = str(m.get("match_status", "")).lower() == "live"
+        if not is_live:
+            try:
+                start = datetime.fromisoformat(m["match_start_date"])
+                end = datetime.fromisoformat(m["match_end_date"])
+                is_live = start <= now < end
+            except Exception:
+                is_live = False
+        t1 = m.get("team1") or None
+        t2 = m.get("team2") or None
+        out.append(KickbdMatch(
+            id=m["slug"],
+            slug=m["slug"],
+            name=(m.get("match_name") or "").strip(),
+            sport=(m.get("sport_name") or "").strip(),
+            status=m.get("match_status") or "",
+            is_live=is_live,
+            start_date=m.get("match_start_date"),
+            end_date=m.get("match_end_date"),
+            poster=m.get("slider_image"),
+            team_a=TeamInfo(name=(t1.get("name") or "").strip(), logo=t1.get("logo")) if t1 else None,
+            team_b=TeamInfo(name=(t2.get("name") or "").strip(), logo=t2.get("logo")) if t2 else None,
+        ))
+    return out
+
+
+async def get_cached_matches() -> list[KickbdMatch]:
+    return await cache.get_or_set(prefix="kickbd", identifier="matches", factory=fetch_matches, ttl=60)
+
+
+# --- Match channels ---
+
+async def fetch_match_channels(slug: str) -> list[dict]:
+    """Returns raw channel dicts: {id, name, server, source_url}."""
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        html = await _fetch_text(f"{_HOME}/matches/iframe/{urllib.parse.quote(slug)}", client)
+    if not html:
+        return []
+    mapping = _extract_json_after(_unescape_flight(html), "channels", "{", "}") or {}
     channels: list[dict] = []
-    for match in _WATCH_RE.finditer(html):
-        cid = int(match.group(1))
-        logo = match.group(2)
-        name = re.sub(r'^KickBD\s+', '', match.group(3).strip(), flags=re.IGNORECASE)
-        channels.append({"id": cid, "name": name, "logo": logo})
-    seen = set()
-    unique = []
-    for ch in channels:
-        if ch["id"] not in seen:
-            seen.add(ch["id"])
-            unique.append(ch)
-    return unique
-
-
-async def _extract_iframe_url(channel_id: int, client: httpx.AsyncClient) -> str | None:
-    html = await _fetch_text(f"{_HOMEPAGE_URL}/watch/{channel_id}", client)
-    if not html:
-        return None
-    match = re.search(r'<iframe[^>]*src=["\']([^"\']+)["\'][^>]*>', html)
-    return match.group(1) if match else None
-
-
-async def _extract_stream_from_source(url: str, client: httpx.AsyncClient) -> dict | None:
-    html = await _fetch_text(url, client)
-    if not html:
-        return None
-    return _parse_source_js(html)
-
-
-async def _extract_stream_from_yagaverse(url: str, client: httpx.AsyncClient) -> dict | None:
-    html = await _fetch_text(url, client)
-    if not html:
-        return None
-    match = re.search(r"const streamUrl\s*=\s*'([^']+)'", html)
-    if match:
-        return {"stream_url": match.group(1), "stream_type": "hls"}
-    return None
-
-
-async def _extract_stream_from_player(url: str, client: httpx.AsyncClient) -> dict | None:
-    html = await _fetch_text(url, client)
-    if not html:
-        return None
-    for pattern in [r'https?://[^"\'<>\s]+\.m3u8[^"\'<>\s]*', r'https?://[^"\'<>\s]+\.mpd[^"\'<>\s]*']:
-        match = re.search(pattern, html)
-        if match:
-            stream_url = match.group()
-            result = {
-                "stream_url": stream_url,
-                "stream_type": _detect_stream_type(stream_url),
-            }
-            kid = re.search(r"k_id['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
-            kv = re.search(r"k_v['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
-            if kid:
-                result["drm_kid"] = kid.group(1)
-            if kv:
-                result["drm_key"] = kv.group(1)
-            return result
-    return None
-
-
-async def _extract_stream_from_soccerball(url: str, client: httpx.AsyncClient) -> dict | None:
-    html = await _fetch_text(url, client)
-    if not html:
-        return None
-    match = re.search(r'https?://[^"\'<>\s]+s\d+\.php[^"\'<>\s]*', html)
-    if match:
-        proxy_url = match.group()
-        proxy_html = await _fetch_text(proxy_url, client)
-        if proxy_html:
-            m3u8s = re.findall(r'https?://[^"\'<>\s]+\.m3u8[^"\'<>\s]*', proxy_html)
-            if m3u8s:
-                return {"stream_url": m3u8s[0], "stream_type": "hls"}
-    m3u8s = re.findall(r'https?://[^"\'<>\s]+\.m3u8[^"\'<>\s]*', html)
-    for m in m3u8s:
-        if "rumble" in m or "chunklist" in m:
-            return {"stream_url": m, "stream_type": "hls"}
-    if m3u8s:
-        return {"stream_url": m3u8s[0], "stream_type": "hls"}
-    return None
-
-
-async def _extract_stream_url(iframe_url: str, client: httpx.AsyncClient) -> dict | None:
-    if not iframe_url:
-        return None
-    if f"{_HOME_NETLOC}/source/" in iframe_url:
-        return await _extract_stream_from_source(iframe_url, client)
-    elif "yagaverse.net" in iframe_url:
-        return await _extract_stream_from_yagaverse(iframe_url, client)
-    elif f"{_HOME_NETLOC}/player/" in iframe_url:
-        return await _extract_stream_from_player(iframe_url, client)
-    elif "soccerball.st" in iframe_url:
-        return await _extract_stream_from_soccerball(iframe_url, client)
-    else:
-        return await _extract_stream_from_player(iframe_url, client)
-
-
-async def _verify_stream(
-    stream_url: str,
-    client: httpx.AsyncClient,
-    drm_kid: str | None = None,
-    stream_type: str = "hls",
-) -> bool:
-    is_drm_dash = bool(drm_kid) and stream_type == "dash"
-    try:
-        req = await client.get(
-            stream_url,
-            headers={
-                **_SCRAPE_HEADERS,
-                "Referer": f"{_HOMEPAGE_URL}/",
-                "Origin": _HOMEPAGE_URL,
-            },
-            timeout=5.0,
-            follow_redirects=True,
-        )
-        if is_drm_dash:
-            return req.is_success or req.status_code == 403
-        return req.is_success
-    except Exception:
-        return False
-
-
-async def fetch_all_channels() -> list[Channel]:
-    channels_raw = await _extract_channel_list()
-    if not channels_raw:
-        return []
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        iframe_results = await asyncio.gather(
-            *[_extract_iframe_url(ch["id"], client) for ch in channels_raw],
-            return_exceptions=True,
-        )
-        channels_with_iframe = []
-        for ch, iframe in zip(channels_raw, iframe_results):
-            if isinstance(iframe, str):
-                ch["iframe_url"] = iframe
-                channels_with_iframe.append(ch)
-            else:
-                channels_with_iframe.append(ch)
-
-        stream_results = await asyncio.gather(
-            *[_extract_stream_url(ch.get("iframe_url", ""), client) for ch in channels_with_iframe],
-            return_exceptions=True,
-        )
-
-    async with httpx.AsyncClient(timeout=5.0) as verify_client:
-        verify_tasks = []
-        for ch, stream_data in zip(channels_with_iframe, stream_results):
-            if isinstance(stream_data, dict) and stream_data.get("stream_url"):
-                verify_tasks.append(
-                    _verify_stream(
-                        stream_data["stream_url"],
-                        verify_client,
-                        stream_data.get("drm_kid"),
-                        stream_data.get("stream_type", "hls"),
-                    )
-                )
-            else:
-                verify_tasks.append(asyncio.sleep(0, result=False))
-
-        verify_results = await asyncio.gather(*verify_tasks, return_exceptions=True)
-
-    channels: list[Channel] = []
-    for i, ch in enumerate(channels_raw):
-        stream_data = stream_results[i] if i < len(stream_results) else None
-        is_alive = verify_results[i] if i < len(verify_results) else False
-
-        if isinstance(stream_data, dict):
-            alive = is_alive and bool(stream_data.get("stream_url"))
-            channels.append(
-                Channel(
-                    id=ch["id"],
-                    name=ch["name"],
-                    logo=ch.get("logo"),
-                    stream_type=stream_data.get("stream_type", "hls"),
-                    stream_url=stream_data.get("stream_url") if alive else None,
-                    drm_kid=stream_data.get("drm_kid") if alive else None,
-                    drm_key=stream_data.get("drm_key") if alive else None,
-                    is_alive=alive,
-                )
-            )
-        else:
-            channels.append(
-                Channel(
-                    id=ch["id"],
-                    name=ch["name"],
-                    logo=ch.get("logo"),
-                    is_alive=False,
-                )
-            )
-
-    logger.info("tv_channels_fetched", count=len(channels), alive=sum(1 for c in channels if c.is_alive))
+    for raw_name, servers in mapping.items():
+        if not isinstance(servers, dict):
+            continue
+        # Strip a leading "KickBD" provider prefix (e.g. "KickBD Edge" -> "Edge").
+        name = re.sub(r"^kickbd\s+", "", raw_name, flags=re.IGNORECASE).strip() or raw_name.strip()
+        for server, info in servers.items():
+            if isinstance(info, dict) and info.get("url"):
+                channels.append({
+                    "id": _channel_key(name, server),
+                    "name": name,
+                    "server": server,
+                    "source_url": info["url"],
+                })
     return channels
 
 
-async def get_cached_channels() -> list[Channel]:
+async def get_cached_match_channels(slug: str) -> list[dict]:
     return await cache.get_or_set(
-        prefix="tv",
-        identifier="channels",
-        factory=fetch_all_channels,
-        ttl=120,
+        prefix="kickbd_mc", identifier=slug, factory=lambda: fetch_match_channels(slug), ttl=120
     )
 
 
-CACHE_SEM = asyncio.Lock()
+def public_channels(raw: list[dict]) -> list[MatchChannel]:
+    return [MatchChannel(id=c["id"], name=c["name"], server=c["server"]) for c in raw]
 
 
-async def get_cached_channel(channel_id: int) -> Channel | None:
-    all_channels = await get_cached_channels()
-    for ch in all_channels:
-        if ch.id == channel_id:
-            return ch
-    return None
+# --- Stream resolution ---
 
-
-# --- Highlights ---
-
-async def _extract_highlight_list() -> list[dict]:
-    html = await _fetch_text(_HOMEPAGE_URL)
-    if not html:
-        return []
-    highlights: list[dict] = []
-    for match in _HIGHLIGHT_RE.finditer(html):
-        slug = match.group(1)
-        highlights.append({"slug": slug})
-    seen = set()
-    unique = []
-    for h in highlights:
-        if h["slug"] not in seen:
-            seen.add(h["slug"])
-            unique.append(h)
-    return unique
-
-
-async def _extract_highlight_detail(slug: str, client: httpx.AsyncClient) -> dict | None:
-    html = await _fetch_text(f"{_HOMEPAGE_URL}/highlights/{slug}", client)
+async def resolve_stream(source_url: str) -> dict | None:
+    async with httpx.AsyncClient(timeout=12.0) as client:
+        html = await _fetch_text(source_url, client)
     if not html:
         return None
-    title_match = re.search(r'<title[^>]*>(.*?)</title>', html)
-    title = re.sub(r'\s*\|\|\s*.*', '', title_match.group(1)).strip() if title_match else slug
-
-    iframe_match = re.search(r'<iframe[^>]*src=["\']([^"\']+)["\'][^>]*>', html)
-    if not iframe_match:
-        return {"slug": slug, "title": title, "stream_url": None, "sources": [], "is_alive": False}
-
-    stream_url = iframe_match.group(1)
-    sources = []
-    final_url = None
-
-    if f"{_CDN_NETLOC}/stream.php" in stream_url:
-        inner_html = await _fetch_text(stream_url, client)
-        if inner_html:
-            payload_match = re.search(r'securePayload\s*=\s*"([^"]+)"', inner_html)
-            if payload_match:
-                try:
-                    import base64
-                    decoded_url = base64.b64decode(payload_match.group(1)).decode()
-                    player_html = await _fetch_text(decoded_url, client)
-                    if player_html:
-                        sources_raw = re.findall(
-                            r'\{[^}]*"file"\s*:\s*"([^"]+)"[^}]*\}', player_html
-                        )
-                        labels = re.findall(r'"label"\s*:\s*"([^"]+)"', player_html)
-                        for i, src in enumerate(sources_raw):
-                            label = labels[i] if i < len(labels) else f"Stream {i}"
-                            sources.append({"label": label, "url": src})
-                        if sources_raw:
-                            final_url = sources_raw[0]
-                except Exception:
-                    pass
-
-    return {
-        "slug": slug,
-        "title": title,
-        "stream_url": final_url or (stream_url if not stream_url.startswith(f"https://{_CDN_NETLOC}/stream.php") else None),
-        "sources": sources,
-        "is_alive": bool(final_url),
-    }
+    if "/source/" in source_url:
+        return _parse_source_js(html)
+    # Generic player page: find an embedded HLS/DASH URL + optional DRM.
+    m = (re.search(r"const streamUrl\s*=\s*['\"]([^'\"]+)['\"]", html)
+         or re.search(r"(?:source|file)\s*:\s*['\"]([^'\"]+\.(?:m3u8|mpd)[^'\"]*)['\"]", html)
+         or re.search(r"https?://[^\"'<>\s]+\.(?:m3u8|mpd)[^\"'<>\s]*", html))
+    if not m:
+        return None
+    url = m.group(1) if m.lastindex else m.group(0)
+    result = {"stream_url": url, "stream_type": "dash" if ".mpd" in url else "hls"}
+    kid = re.search(r"k_id['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
+    kv = re.search(r"k_v['\"]?\s*[:=]\s*['\"]([^'\"]+)['\"]", html)
+    if kid:
+        result["drm_kid"] = kid.group(1)
+    if kv:
+        result["drm_key"] = kv.group(1)
+    return result
 
 
-async def fetch_all_highlights() -> list[Highlight]:
-    raw = await _extract_highlight_list()
-    if not raw:
-        return []
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        details = await asyncio.gather(
-            *[_extract_highlight_detail(h["slug"], client) for h in raw],
-            return_exceptions=True,
-        )
-
-    highlights: list[Highlight] = []
-    for d in details:
-        if isinstance(d, dict):
-            highlights.append(
-                Highlight(
-                    slug=d.get("slug", ""),
-                    title=d.get("title", ""),
-                    thumbnail=None,
-                    stream_url=d.get("stream_url"),
-                    sources=d.get("sources", []),
-                    is_alive=d.get("is_alive", False),
-                )
-            )
-
-    logger.info("tv_highlights_fetched", count=len(highlights))
-    return highlights
-
-
-async def get_cached_highlights() -> list[Highlight]:
+async def get_cached_stream(slug: str, ch_id: str, source_url: str) -> dict | None:
     return await cache.get_or_set(
-        prefix="tv",
-        identifier="highlights",
-        factory=fetch_all_highlights,
-        ttl=120,
+        prefix="kickbd_st", identifier=f"{slug}:{ch_id}",
+        factory=lambda: resolve_stream(source_url), ttl=45,
     )
-
-
-async def get_cached_highlight(slug: str) -> Highlight | None:
-    all_highlights = await get_cached_highlights()
-    for h in all_highlights:
-        if h.slug == slug:
-            return h
-    return None

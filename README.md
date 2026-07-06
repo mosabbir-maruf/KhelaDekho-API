@@ -30,13 +30,12 @@ KhelaDekho-API/
 │   │   └── v4.py             # V4 channel models
 │   ├── routes/               # API routers
 │   │   ├── v1.py             # V1 score provider (scores, match/player/team)
-│   │   ├── v2.py             # V2 channels, highlights, live matches, proxy
+│   │   ├── v2.py             # V2 matches, match channels, stream, proxy
 │   │   └── v4.py             # V4 channels, stream, stats, proxy
 │   └── services/             # Scraping / caching logic
 │       ├── cache.py          # In-memory TTL cache + stampede protection
 │       ├── goal_scores.py    # V1 provider scraper (base URL from env)
-│       ├── channels.py       # V2 channel/highlight extraction
-│       ├── kickbd_matches.py # V2 live matches
+│       ├── channels.py       # V2 match/channel scraping + stream resolution
 │       └── proxybdix.py      # V4 channel/stream extraction
 ├── worker/
 │   ├── src/index.js          # Cloudflare Worker (Hono) — same API at the edge
@@ -64,14 +63,15 @@ Live football scores, fixtures, results and match/player/team detail. The provid
 | `GET /api/v1/player/{id}` | Player profile + season stats |
 | `GET /api/v1/team/{id}` | Team info + recent matches |
 
-### V2 — Channel Provider
+### V2 — Channel Provider (match-centric)
+Matches are listed first; each match exposes its own channels, and a channel's
+stream is resolved lazily on demand.
+
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/v2/channels` | Channel list |
-| `GET /api/v2/channels/{id}` | Single channel |
-| `GET /api/v2/highlights` | Highlights list |
-| `GET /api/v2/highlights/{slug}` | Single highlight |
-| `GET /api/v2/matches/live` | Live matches |
+| `GET /api/v2/matches` | Match list (`?live=true` for live only) |
+| `GET /api/v2/matches/{slug}/channels` | Channels for a match |
+| `GET /api/v2/matches/{slug}/stream?ch={id}` | Resolve one channel's stream + DRM |
 | `GET /api/v2/proxy?url=` | CORS/segment proxy |
 
 ### V4 — Channel Provider
@@ -123,15 +123,29 @@ Or with Docker: `docker compose up --build`.
 
 ## Cloudflare Worker
 
+The Worker is the production API (deployed at the edge). It serves the exact same
+routes as the FastAPI app.
+
+**Run locally** (Wrangler dev server on `http://localhost:8787`):
+
 ```bash
-cd worker
+cd worker            # or run from the repo root (uses ./wrangler.toml)
 npm install
-npm run dev        # http://localhost:8787
-npm run deploy
+npm run dev          # local dev at http://localhost:8787
 ```
 
-Set `V1_HOME_URL`, `V2_HOME_URL`, `V4_HOME_URL` in `wrangler.toml` under `[vars]`,
-and the secret with `wrangler secret put XKEY`.
+Point the frontend at it during development by setting
+`KHELADEKHO_API_URL=http://localhost:8787` in the frontend `.env.local`.
+
+**Configure & deploy:**
+
+```bash
+# Set upstreams in wrangler.toml under [vars]:
+#   V1_HOME_URL, V2_HOME_URL, V4_HOME_URL
+# Optional: ENVIRONMENT = "development" for verbose local logs
+wrangler secret put XKEY     # shared API key (never commit it)
+npm run deploy
+```
 
 ---
 
