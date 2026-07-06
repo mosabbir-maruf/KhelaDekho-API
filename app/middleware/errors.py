@@ -8,7 +8,10 @@ from app.models import StandardResponse
 logger = structlog.get_logger(__name__)
 
 async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    logger.exception("unhandled_internal_error", path=request.url.path, error=str(exc))
+    try:
+        logger.exception("unhandled_internal_error", path=request.url.path, error=str(exc))
+    except Exception:
+        pass
     
     error_content = StandardResponse(
         success=False,
@@ -24,7 +27,10 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
     )
 
 async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-    logger.warning("http_exception", path=request.url.path, status_code=exc.status_code, detail=exc.detail)
+    try:
+        logger.warning("http_exception", path=request.url.path, status_code=exc.status_code, detail=exc.detail)
+    except Exception:
+        pass
     
     error_content = StandardResponse(
         success=False,

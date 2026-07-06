@@ -29,7 +29,7 @@ structlog.configure(
         _renderer,
     ],
     context_class=dict,
-    logger_factory=structlog.PrintLoggerFactory(),
+    logger_factory=structlog.stdlib.LoggerFactory(),
     wrapper_class=structlog.make_filtering_bound_logger(_min_level),
     cache_logger_on_first_use=True,
 )
