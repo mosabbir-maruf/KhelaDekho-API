@@ -52,3 +52,25 @@ class StreamResponse(BaseModel):
     stream_type: str = "hls"
     drm_kid: Optional[str] = None
     drm_key: Optional[str] = None
+
+
+# --- V5 TV Channel (DLHD) ---
+
+class TVChannel(BaseModel):
+    id: str
+    name: str
+    image: str = ""
+    country: str = "intl"
+    category: str = "General"
+
+
+class TVChannelListResponse(BaseModel):
+    channels: list[TVChannel]
+    total: int
+    cached_at: datetime = Field(default_factory=lambda: datetime.now(BDT))
+
+
+class TVStreamResponse(BaseModel):
+    id: str
+    stream_url: str
+    stream_type: str = "hls"

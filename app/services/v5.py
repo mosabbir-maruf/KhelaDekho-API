@@ -172,3 +172,54 @@ async def get_cached_stream(slug: str, ch_id: str, source_url: str) -> dict | No
         prefix="v5_st", identifier=f"{slug}:{ch_id}",
         factory=lambda: resolve_stream(source_url), ttl=45,
     )
+
+
+# --- V5 TV Channels (DLHD 24/7) ---
+
+import re as _re
+
+def detect_channel_category(name: str) -> str:
+    n = f" {name.lower()} "
+    if _re.search(r"sport|espn|sky\s?sport|fox\s?sport|bein|dazn|nba|nfl|nhl|mlb|"
+                  r"tnt\s?sport|premier|football|cricket|tennis|golf|wwe|ufc|racing|"
+                  r"motogp|formula|\bf1\b|supersport|willow|optus", n):
+        return "Sports"
+    if _re.search(r"news|cnn|bbc\s?news|fox\s?news|sky\s?news|al\s?jazeera|msnbc|cnbc|gb\s?news", n):
+        return "News"
+    if _re.search(r"kids|cartoon|disney|nick|baby|boomerang|pbs\s?kids", n):
+        return "Kids"
+    if _re.search(r"movie|cinema|hbo|\bamc\b|film|starz|showtime|cinemax|paramount", n):
+        return "Entertainment"
+    if _re.search(r"music|mtv|vh1|radio|hits|rhythm|beat|concert|band|billboard", n):
+        return "Music"
+    return "General"
+
+
+async def fetch_tv_channels() -> list[dict]:
+    data = await _fetch_json(f"{_HOME}/data/dlhd-channels.json?v=7")
+    if not isinstance(data, dict):
+        return []
+    raw = data.get("channels") or []
+    out = []
+    for ch in raw:
+        if isinstance(ch, dict) and ch.get("id") and ch.get("name"):
+            out.append({
+                "id": f"dlhd-{ch['id']}",
+                "name": ch["name"].strip(),
+                "image": ch.get("image") or "",
+                "country": ch.get("country") or "intl",
+                "category": detect_channel_category(ch["name"]),
+            })
+    return out
+
+
+async def get_cached_tv_channels() -> list[dict]:
+    return await cache.get_or_set(
+        prefix="v5_tv", identifier="channels", factory=fetch_tv_channels, ttl=120,
+    )
+
+
+async def resolve_tv_channel_stream(channel_id: str) -> dict | None:
+    dlhd_id = channel_id.replace("dlhd-", "")
+    resolve_url = f"{_API_BASE}/tv/resolve/dlhd-{dlhd_id}"
+    return await resolve_stream(resolve_url)

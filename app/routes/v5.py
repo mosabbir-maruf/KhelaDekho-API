@@ -13,12 +13,16 @@ from app.models.v2 import (
     KickbdMatchListResponse,
     MatchChannelListResponse,
     StreamResponse,
+    TVChannelListResponse,
+    TVStreamResponse,
 )
 from app.services.v5 import (
     get_cached_match_channels,
     get_cached_matches,
     get_cached_stream,
+    get_cached_tv_channels,
     public_channels,
+    resolve_tv_channel_stream,
 )
 
 logger = structlog.get_logger(__name__)
@@ -90,6 +94,34 @@ async def get_match_stream(slug: str, ch: str = Query(..., min_length=1)):
             drm_kid=stream.get("drm_kid"),
             drm_key=stream.get("drm_key"),
         ),
+    )
+
+
+@router.get(
+    "/tv/channels",
+    response_model=StandardResponse[TVChannelListResponse],
+    dependencies=[Depends(rate_limit)],
+)
+async def list_tv_channels():
+    channels = await get_cached_tv_channels()
+    return StandardResponse(
+        success=True,
+        data=TVChannelListResponse(channels=channels, total=len(channels)),
+    )
+
+
+@router.get(
+    "/tv/channel/{channel_id}/stream",
+    response_model=StandardResponse[TVStreamResponse],
+)
+async def get_tv_channel_stream(channel_id: str):
+    stream = await resolve_tv_channel_stream(channel_id)
+    if not stream or not stream.get("stream_url"):
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Stream unavailable")
+    stream_url = f"{_PROXY_BASE}{urllib.parse.quote(stream['stream_url'], safe='')}"
+    return StandardResponse(
+        success=True,
+        data=TVStreamResponse(id=channel_id, stream_url=stream_url, stream_type=stream.get("stream_type", "hls")),
     )
 
 
