@@ -13,7 +13,6 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 import app.logging_config  # noqa: F401
 from app.config import settings
 from app.dependencies.auth import verify_xkey
-from app.dependencies.rate_limit import APIRateLimiter
 from app.middleware.errors import (
     global_exception_handler,
     http_exception_handler,
@@ -52,15 +51,6 @@ app.add_middleware(
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
 
-@app.middleware("http")
-async def add_rate_limit_headers(request: Request, call_next):
-    response = await call_next(request)
-    rate_limit_headers = getattr(request.state, "rate_limit_headers", None)
-    if rate_limit_headers:
-        response.headers.update(rate_limit_headers)
-    return response
-
-
 # All API routers require the shared xkey (proxy routes are exempt inside the
 # dependency because media players cannot attach custom headers).
 _auth = [Depends(verify_xkey)]
@@ -69,14 +59,11 @@ app.include_router(v2_routes.router, dependencies=_auth)
 app.include_router(v4_routes.router, dependencies=_auth)
 app.include_router(v5_routes.router, dependencies=_auth)
 
-_rate_limit_std = APIRateLimiter(requests=100, window=60)
-
 
 @app.get(
     "/api/v1/health",
     response_model=StandardResponse[HealthResponse],
     status_code=status.HTTP_200_OK,
-    dependencies=[Depends(_rate_limit_std)],
 )
 async def health_check():
     return StandardResponse(

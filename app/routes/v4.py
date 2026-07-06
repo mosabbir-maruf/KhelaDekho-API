@@ -8,7 +8,6 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.config import settings, BDT
-from app.dependencies.rate_limit import APIRateLimiter
 from app.models import StandardResponse
 from app.models.v4 import (
     ProxybdixChannel,
@@ -24,7 +23,6 @@ from app.services.v4 import (
 )
 
 router = APIRouter(prefix="/api/v4")
-rate_limit = APIRateLimiter(requests=100, window=60)
 
 _start_time: float = time.monotonic()
 
@@ -32,8 +30,7 @@ _start_time: float = time.monotonic()
 @router.get(
     "/health",
     response_model=StandardResponse[ProxybdixHealthResponse],
-    status_code=status.HTTP_200_OK,
-    dependencies=[Depends(rate_limit)],
+    status_code=status.HTTP_200_OK
 )
 async def health_check():
     return StandardResponse(
@@ -47,8 +44,7 @@ async def health_check():
 
 @router.get(
     "/channels",
-    response_model=StandardResponse[ProxybdixChannelListResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[ProxybdixChannelListResponse]
 )
 async def list_channels(
     q: Optional[str] = Query(None, min_length=1, max_length=50),
@@ -73,8 +69,7 @@ async def list_channels(
 
 @router.get(
     "/channels/{channel_id}",
-    response_model=StandardResponse[ProxybdixChannel],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[ProxybdixChannel]
 )
 async def get_channel(channel_id: str):
     channel = await get_cached_channel(channel_id)
@@ -85,8 +80,7 @@ async def get_channel(channel_id: str):
 
 @router.get(
     "/channels/{channel_id}/stream",
-    response_model=StandardResponse[ProxybdixStreamResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[ProxybdixStreamResponse]
 )
 async def get_channel_stream(channel_id: str):
     channel = await get_cached_channel(channel_id)
@@ -146,8 +140,7 @@ async def proxy_stream(url: str = Query(..., min_length=10)):
 
 @router.get(
     "/stats",
-    response_model=StandardResponse[ProxybdixStatsResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[ProxybdixStatsResponse]
 )
 async def get_stats():
     channels = await get_cached_channels()

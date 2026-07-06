@@ -9,7 +9,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-from app.dependencies.rate_limit import APIRateLimiter
 from app.models import StandardResponse
 from app.models.goal_scores import (
     GoalMatchDetailResponse,
@@ -25,7 +24,6 @@ from app.services.v1 import (
 )
 
 router = APIRouter(prefix="/api/v1")
-rate_limit = APIRateLimiter(requests=60, window=60)
 
 _DATE_PATTERN = r"^\d{4}-\d{2}-\d{2}$"
 
@@ -52,8 +50,7 @@ def _filter_data(
 
 @router.get(
     "/scores",
-    response_model=StandardResponse[GoalScoresResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[GoalScoresResponse]
 )
 async def list_scores(
     date: Optional[str] = Query(None, pattern=_DATE_PATTERN),
@@ -68,8 +65,7 @@ async def list_scores(
 
 
 @router.get(
-    "/competitions",
-    dependencies=[Depends(rate_limit)],
+    "/competitions"
 )
 async def list_competitions(date: Optional[str] = Query(None, pattern=_DATE_PATTERN)):
     data = await get_cached_goal_scores(date=date)
@@ -95,8 +91,7 @@ async def list_competitions(date: Optional[str] = Query(None, pattern=_DATE_PATT
 
 @router.get(
     "/matches/{match_id}",
-    response_model=StandardResponse[GoalMatchDetailResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[GoalMatchDetailResponse]
 )
 async def get_match_detail(
     match_id: str,
@@ -115,8 +110,7 @@ async def get_match_detail(
 
 @router.get(
     "/player/{player_id}",
-    response_model=StandardResponse[GoalPlayerDetailResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[GoalPlayerDetailResponse]
 )
 async def get_player_detail(
     player_id: str,
@@ -130,8 +124,7 @@ async def get_player_detail(
 
 @router.get(
     "/team/{team_id}",
-    response_model=StandardResponse[GoalTeamDetailResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[GoalTeamDetailResponse]
 )
 async def get_team_detail(
     team_id: str,

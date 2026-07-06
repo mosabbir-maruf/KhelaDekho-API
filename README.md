@@ -21,7 +21,7 @@ KhelaDekho-API/
 │   ├── logging_config.py         # Environment-gated structlog setup
 │   ├── dependencies/
 │   │   ├── auth.py               # Shared xkey verification
-│   │   └── rate_limit.py         # Sliding-window rate limiter
+│   │   └── rate_limit.py         # (removed - contact form only)
 │   ├── middleware/
 │   │   └── errors.py             # Global exception handlers
 │   ├── models/                   # Pydantic response models
@@ -177,9 +177,3 @@ npm run deploy
 
 ---
 
-## Rate limiting
-
-API data endpoints use in-memory sliding-window rate limiting. Proxy endpoints
-(v2/v4/v5 `/proxy`) are exempt since they are consumed by the player for live
-playlist refreshes. The Worker can optionally sync to a bound `KHELADEKHO_STORE`
-KV namespace for distributed limits.

@@ -7,7 +7,6 @@ import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from app.config import settings
-from app.dependencies.rate_limit import APIRateLimiter
 from app.models import StandardResponse
 from app.models.v2 import (
     KickbdMatchListResponse,
@@ -24,15 +23,13 @@ from app.services.channels import (
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v2")
-rate_limit = APIRateLimiter(requests=100, window=60)
 
 _PROXY_BASE = "/api/v2/proxy?url="
 
 
 @router.get(
     "/matches",
-    response_model=StandardResponse[KickbdMatchListResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[KickbdMatchListResponse]
 )
 async def list_matches(live: bool = Query(False)):
     matches = await get_cached_matches()
@@ -46,8 +43,7 @@ async def list_matches(live: bool = Query(False)):
 
 @router.get(
     "/matches/{slug}/channels",
-    response_model=StandardResponse[MatchChannelListResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[MatchChannelListResponse]
 )
 async def list_match_channels(slug: str):
     raw = await get_cached_match_channels(slug)
@@ -60,8 +56,7 @@ async def list_match_channels(slug: str):
 
 @router.get(
     "/matches/{slug}/stream",
-    response_model=StandardResponse[StreamResponse],
-    dependencies=[Depends(rate_limit)],
+    response_model=StandardResponse[StreamResponse]
 )
 async def get_match_stream(slug: str, ch: str = Query(..., min_length=1)):
     raw = await get_cached_match_channels(slug)
