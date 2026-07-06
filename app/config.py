@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     v1_home_url: str = Field(default="", validation_alias="V1_HOME_URL")
     v2_home_url: str = Field(default="", validation_alias="V2_HOME_URL")
     v4_home_url: str = Field(default="", validation_alias="V4_HOME_URL")
+    v5_home_url: str = Field(default="", validation_alias="V5_HOME_URL")
 
     user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_7) AppleWebKit/605.1.15 "

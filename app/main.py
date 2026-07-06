@@ -23,6 +23,7 @@ from app.models import HealthResponse, StandardResponse
 from app.routes import v1 as v1_routes
 from app.routes import v2 as v2_routes
 from app.routes import v4 as v4_routes
+from app.routes import v5 as v5_routes
 
 logger = structlog.get_logger(__name__)
 
@@ -66,6 +67,7 @@ _auth = [Depends(verify_xkey)]
 app.include_router(v1_routes.router, dependencies=_auth)
 app.include_router(v2_routes.router, dependencies=_auth)
 app.include_router(v4_routes.router, dependencies=_auth)
+app.include_router(v5_routes.router, dependencies=_auth)
 
 _rate_limit_std = APIRateLimiter(requests=100, window=60)
 
