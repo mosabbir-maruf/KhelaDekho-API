@@ -92,7 +92,7 @@ _PROXY_FORWARD_HEADERS = {
 }
 
 
-@router.get("/proxy", dependencies=[Depends(rate_limit)])
+@router.get("/proxy")
 async def proxy_stream(url: str = Query(..., min_length=10)):
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:

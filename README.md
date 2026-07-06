@@ -168,5 +168,7 @@ npm run deploy
 
 ## Rate limiting
 
-All endpoints use in-memory sliding-window rate limiting. The Worker can optionally
-sync to a bound `KHELADEKHO_STORE` KV namespace for distributed limits.
+API data endpoints use in-memory sliding-window rate limiting. Proxy endpoints
+(v2/v4/v5 `/proxy`) are exempt since they are consumed by the player for live
+playlist refreshes. The Worker can optionally sync to a bound `KHELADEKHO_STORE`
+KV namespace for distributed limits.
