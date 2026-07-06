@@ -27,16 +27,19 @@ KhelaDekho-API/
 │   │   ├── __init__.py       # StandardResponse, HealthResponse
 │   │   ├── goal_scores.py    # V1 score-provider models
 │   │   ├── v2.py             # V2 channel models
-│   │   └── v4.py             # V4 channel models
+│   │   ├── v4.py             # V4 channel models
+│   │   └── v5.py             # V5 match models
 │   ├── routes/               # API routers
 │   │   ├── v1.py             # V1 score provider (scores, match/player/team)
 │   │   ├── v2.py             # V2 matches, match channels, stream, proxy
-│   │   └── v4.py             # V4 channels, stream, stats, proxy
+│   │   ├── v4.py             # V4 channels, stream, stats, proxy
+│   │   └── v5.py             # V5 matches, channels, stream, proxy
 │   └── services/             # Scraping / caching logic
 │       ├── cache.py          # In-memory TTL cache + stampede protection
 │       ├── goal_scores.py    # V1 provider scraper (base URL from env)
 │       ├── channels.py       # V2 match/channel scraping + stream resolution
-│       └── proxybdix.py      # V4 channel/stream extraction
+│       ├── proxybdix.py      # V4 channel/stream extraction
+│       └── v5.py             # V5 match/channel/stream resolution
 ├── worker/
 │   ├── src/index.js          # Cloudflare Worker (Hono) — same API at the edge
 │   └── wrangler.toml         # Worker config
@@ -84,6 +87,17 @@ stream is resolved lazily on demand.
 | `GET /api/v4/proxy?url=` | CORS/segment proxy |
 | `GET /api/v4/stats` | Platform metrics |
 
+### V5 — Match-centric Streams
+Match-first API: list live/upcoming matches, then browse channels per match and
+resolve streams on demand. Supports both TV channels and substreams.
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/v5/matches` | Match list (football) |
+| `GET /api/v5/matches/{slug}/channels` | Channels + substreams for a match |
+| `GET /api/v5/matches/{slug}/stream?ch={id}` | Resolve one channel/substream |
+| `GET /api/v5/proxy?url=` | CORS/Referer proxy for TV manifests |
+
 ---
 
 ## Configuration
@@ -97,6 +111,9 @@ auth keys use unprefixed aliases so they match the Worker and frontend.
 | `V1_HOME_URL` | Score-provider base URL | — |
 | `V2_HOME_URL` | V2 channel-provider base URL | — |
 | `V4_HOME_URL` | V4 channel-provider base URL | — |
+| `V5_HOME_URL` | V5 match-provider base URL | — |
+| `PROXY_REQUIRED_PATTERNS` | Comma-sep domains/URLs that need proxying | `phantemlis.top,/papi/tv/playlist/` |
+| `CACHE_INTERNAL_DOMAIN` | Internal domain for cache key partitioning | `kheladekho-cache.internal` |
 | `KHELADEKHO_DEBUG` | Verbose console logging | `false` |
 | `KHELADEKHO_LOG_LEVEL` | Log level in production | `INFO` |
 
@@ -113,7 +130,7 @@ compact JSON at `LOG_LEVEL` otherwise. The Worker logs only when
 ```bash
 python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env      # set XKEY, V1_HOME_URL, V2_HOME_URL, V4_HOME_URL
+cp .env.example .env      # set XKEY, V1_HOME_URL, V2_HOME_URL, V4_HOME_URL, V5_HOME_URL
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -141,7 +158,7 @@ Point the frontend at it during development by setting
 
 ```bash
 # Set upstreams in wrangler.toml under [vars]:
-#   V1_HOME_URL, V2_HOME_URL, V4_HOME_URL
+#   V1_HOME_URL, V2_HOME_URL, V4_HOME_URL, V5_HOME_URL
 # Optional: ENVIRONMENT = "development" for verbose local logs
 wrangler secret put XKEY     # shared API key (never commit it)
 npm run deploy

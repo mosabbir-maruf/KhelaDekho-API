@@ -140,9 +140,14 @@ async function fetchJson(url) {
 
 // Unified cache helper with stale-while-revalidate + stampede protection
 const fetchPromises = new Map();
+function cacheDomain(c) { return c.env.CACHE_INTERNAL_DOMAIN || 'kheladekho-cache.internal'; }
+function needsProxy(url, c) {
+  const patterns = (c.env.PROXY_REQUIRED_PATTERNS || 'phantemlis.top,/papi/tv/playlist/').split(',');
+  return patterns.some(p => url.includes(p));
+}
 async function getCachedOrFetch(c, key, fetchFn, ttl) {
   const cache = caches.default;
-  const cacheReq = new Request(`http://kheladekho-cache.internal/${key}`);
+  const cacheReq = new Request(`http://${cacheDomain(c)}/${key}`);
   const hit = await cache.match(cacheReq);
 
   if (hit) {
@@ -694,6 +699,7 @@ app.get('/', rateLimiterMiddleware(100, 60), (c) => c.json(makeResponse(true, {
     scores: '/api/v1/scores',
     matches_v2: '/api/v2/matches',
     channels_v4: '/api/v4/channels',
+    matches_v5: '/api/v5/matches',
   }
 })));
 app.get('/health', (c) => c.redirect('/api/v1/health', 301));
@@ -934,7 +940,14 @@ app.get('/api/v2/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         const text = new TextDecoder().decode(body);
         const rewritten = text.split('\n').map(line => {
           const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) return line;
+          if (!trimmed) return line;
+          if (trimmed.startsWith('#')) {
+            return line.replace(/URI="([^"]*)"/g, (m, uri) => {
+              if (!uri || uri.startsWith('http')) return m;
+              try { return `URI="${proxyBase}${encodeURIComponent(new URL(uri, origUrl.origin + baseDir).href)}"`; }
+              catch { return m; }
+            });
+          }
           try {
             const resolved = trimmed.startsWith('http') ? trimmed : new URL(trimmed, origUrl.origin + baseDir).href;
             return proxyBase + encodeURIComponent(resolved);
@@ -1062,7 +1075,14 @@ app.get('/api/v4/proxy', rateLimiterMiddleware(100, 60), async (c) => {
         const text = new TextDecoder().decode(body);
         const rewritten = text.split('\n').map(line => {
           const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#')) return line;
+          if (!trimmed) return line;
+          if (trimmed.startsWith('#')) {
+            return line.replace(/URI="([^"]*)"/g, (m, uri) => {
+              if (!uri || uri.startsWith('http')) return m;
+              try { return `URI="${proxyBase}${encodeURIComponent(new URL(uri, origUrl.origin + baseDir).href)}"`; }
+              catch { return m; }
+            });
+          }
           try {
             const resolved = trimmed.startsWith('http') ? trimmed : new URL(trimmed, origUrl.origin + baseDir).href;
             return proxyBase + encodeURIComponent(resolved);
@@ -1097,4 +1117,241 @@ app.get('/api/v4/stats', rateLimiterMiddleware(100, 60), async (c) => {
   let users = 0;
   try { const data = await fetchJson(`${homeUrl}/api.php?action=count`); users = data.users || 0; } catch (e) {}
   return c.json(makeResponse(true, { online_users: users, channel_count: channels.length, cached_at: new Date().toISOString() }));
+});
+
+// =========================================================================
+// V5 — Match-centric streams (JSON API, similar to V2)
+// =========================================================================
+
+const getV5Home = (c) => c.env.V5_HOME_URL || '';
+
+function v5ChannelKey(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+}
+
+async function fetchV5Matches(homeUrl) {
+  const data = await fetchJson(`${homeUrl}/papi/matches/football`);
+  if (!Array.isArray(data)) return [];
+
+  const out = [];
+  const seen = new Set();
+
+  for (const m of data) {
+    if (!m || !m.id) continue;
+    const slug = v5ChannelKey(m.title || String(m.id));
+    if (seen.has(slug)) continue;
+    seen.add(slug);
+
+    const teams = m.teams || {};
+    const t1 = teams.home || {};
+    const t2 = teams.away || {};
+
+    out.push({
+      id: slug,
+      slug,
+      name: (m.title || '').trim(),
+      sport: (m.category || 'football').trim(),
+      status: m.status || '',
+      is_live: m.status === 'live',
+      start_date: m.date || null,
+      end_date: null,
+      poster: m.poster || m.ppvPoster || null,
+      team_a: t1.name ? { name: t1.name.trim(), logo: t1.badge || null } : null,
+      team_b: t2.name ? { name: t2.name.trim(), logo: t2.badge || null } : null,
+      cached_at: new Date().toISOString(),
+    });
+  }
+  return out;
+}
+
+async function fetchV5MatchChannels(homeUrl, slug) {
+  const data = await fetchJson(`${homeUrl}/papi/matches/football`);
+  if (!Array.isArray(data)) return [];
+
+  const rawMatch = data.find(m => m && m.id && v5ChannelKey(m.title || String(m.id)) === slug);
+  if (!rawMatch) return [];
+
+  const channels = [];
+  const tvChannels = rawMatch.tvChannels || [];
+  const substreams = rawMatch.substreams || [];
+
+  for (const ch of tvChannels) {
+    if (ch && ch.id) {
+      channels.push({
+        id: `dlhd-${ch.id}`,
+        name: ch.name || 'TV Channel',
+        server: 'TV',
+        source_url: `${homeUrl}/papi/tv/resolve/dlhd-${ch.id}`,
+      });
+    }
+  }
+
+  for (const sub of substreams) {
+    if (sub && sub.id) {
+      channels.push({
+        id: `sub-${v5ChannelKey(sub.id)}`,
+        name: sub.name || 'Substream',
+        server: (sub.locale || 'intl').toUpperCase(),
+        source_url: `${homeUrl}/papi/extract-url/${sub.id}`,
+      });
+    }
+  }
+
+  if (channels.length === 0 && rawMatch.embedUrl) {
+    channels.push({
+      id: `embed-${slug}`,
+      name: rawMatch.title || 'Embed Stream',
+      server: 'Primary',
+      source_url: rawMatch.embedUrl,
+    });
+  }
+
+  return channels;
+}
+
+async function resolveV5Stream(sourceUrl, homeUrl) {
+  if (sourceUrl.includes('/tv/resolve/') || sourceUrl.includes('/extract-url/')) {
+    try {
+      const res = await fetch(sourceUrl, {
+        headers: {
+          'User-Agent': nextUA(),
+          'Accept': 'application/json',
+          'Referer': `${homeUrl}/`,
+          'Origin': homeUrl,
+        },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (!data || !data.success) return null;
+      // TV channel (/papi/tv/resolve/): response has "stream"
+      if (data.stream) {
+        const resolvedUrl = data.stream.startsWith('/') ? homeUrl + data.stream : data.stream;
+        return { stream_url: resolvedUrl, stream_type: 'hls' };
+      }
+      // Substream (/papi/extract-url/): response has "hlsUrl"
+      if (data.hlsUrl) {
+        return { stream_url: data.hlsUrl, stream_type: 'hls' };
+      }
+    } catch { return null; }
+    return null;
+  }
+  return {
+    stream_url: sourceUrl,
+    stream_type: sourceUrl.includes('.m3u8') ? 'hls' : 'dash',
+  };
+}
+
+app.get('/api/v5/matches', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV5Home(c);
+  const matches = await getCachedOrFetch(c, 'v5_matches', () => fetchV5Matches(homeUrl), 60);
+  const list = c.req.query('live') === 'true' ? matches.filter(m => m.is_live) : matches;
+  return c.json(makeResponse(true, { matches: list, total: list.length, cached_at: new Date().toISOString() }));
+});
+
+app.get('/api/v5/matches/:slug/channels', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV5Home(c);
+  const slug = c.req.param('slug');
+  const channels = await getCachedOrFetch(c, `v5_mc_${slug}`, () => fetchV5MatchChannels(homeUrl, slug), 120);
+  const safe = channels.map(({ id, name, server }) => ({ id, name, server }));
+  return c.json(makeResponse(true, { slug, channels: safe, total: safe.length, cached_at: new Date().toISOString() }));
+});
+
+app.get('/api/v5/matches/:slug/stream', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV5Home(c);
+  const slug = c.req.param('slug');
+  const chId = c.req.query('ch');
+  if (!chId) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'ch parameter required' }), 400);
+
+  const channels = await getCachedOrFetch(c, `v5_mc_${slug}`, () => fetchV5MatchChannels(homeUrl, slug), 120);
+  const channel = channels.find(ch => ch.id === chId);
+  if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
+
+  const stream = await getCachedOrFetch(c, `v5_st_${slug}_${chId}`, () => resolveV5Stream(channel.source_url, homeUrl), 45);
+  if (!stream || !stream.stream_url) return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
+
+  let streamUrl = stream.stream_url;
+  if (needsProxy(streamUrl, c)) {
+    streamUrl = `/api/v5/proxy?url=${encodeURIComponent(streamUrl)}`;
+  }
+
+  return c.json(makeResponse(true, {
+    name: channel.name,
+    stream_url: streamUrl,
+    stream_type: stream.stream_type,
+    drm_kid: stream.drm_kid || null,
+    drm_key: stream.drm_key || null,
+  }));
+});
+
+app.get('/api/v5/proxy', rateLimiterMiddleware(100, 60), async (c) => {
+  const url = c.req.query('url');
+  if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
+
+  const homeUrl = getV5Home(c);
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': nextUA(), 'Accept': '*/*', 'Accept-Language': 'en-US,en;q=0.9',
+        'Referer': `${homeUrl}/`, 'Origin': homeUrl,
+      },
+      redirect: 'follow',
+    });
+    let body = await resp.arrayBuffer();
+    let contentType = resp.headers.get('content-type') || 'application/octet-stream';
+
+    if (body.byteLength > 10) {
+      const head = new TextDecoder().decode(body.slice(0, 50));
+      const reqUrl = new URL(c.req.url);
+      const proxyBase = `${reqUrl.origin}/api/v5/proxy?url=`;
+      const origUrl = new URL(url);
+      const baseDir = origUrl.pathname.substring(0, origUrl.pathname.lastIndexOf('/') + 1);
+
+      if (head.startsWith('#EXTM3U')) {
+        contentType = 'application/vnd.apple.mpegurl';
+        const text = new TextDecoder().decode(body);
+        const rewritten = text.split('\n').map(line => {
+          const trimmed = line.trim();
+          if (!trimmed) return line;
+          // Rewrite URI="..." attributes inside EXT tags (e.g. EXT-X-MEDIA)
+          if (trimmed.startsWith('#')) {
+            return line.replace(/URI="([^"]*)"/g, (m, uri) => {
+              if (!uri || uri.startsWith('http')) return m;
+              try {
+                const resolved = new URL(uri, origUrl.origin + baseDir).href;
+                if (needsProxy(resolved, c)) {
+                  return `URI="${proxyBase}${encodeURIComponent(resolved)}"`;
+                }
+                return `URI="${resolved}"`;
+              } catch { return m; }
+            });
+          }
+          try {
+            const resolved = trimmed.startsWith('http') ? trimmed : new URL(trimmed, origUrl.origin + baseDir).href;
+            if (needsProxy(resolved, c)) {
+              return proxyBase + encodeURIComponent(resolved);
+            }
+            return resolved;
+          } catch { return line; }
+        }).join('\n');
+        body = new TextEncoder().encode(rewritten).buffer;
+      } else if (head.includes('<MPD') || head.includes('<?xml')) {
+        contentType = 'application/dash+xml';
+        let text = new TextDecoder().decode(body);
+        const cdnBase = origUrl.origin + baseDir;
+        if (!text.includes('<BaseURL')) {
+          text = text.replace(/(<MPD[^>]*>)/, `$1<BaseURL>${cdnBase}</BaseURL>`);
+        }
+        body = new TextEncoder().encode(text).buffer;
+      }
+    }
+
+    const isSegment = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init');
+    const cacheMaxAge = isSegment ? 86400 : 5;
+    return new Response(body, {
+      status: resp.status,
+      headers: { 'Content-Type': contentType, 'Access-Control-Allow-Origin': '*', 'Cache-Control': `public, max-age=${cacheMaxAge}` },
+    });
+  } catch (e) {
+    return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Failed to fetch stream' }), 502);
+  }
 });
