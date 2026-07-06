@@ -314,11 +314,11 @@ function validDate(c) {
 }
 const scoresCacheKey = (date) => `goal/scores_${date || 'today'}`;
 
-app.get('/api/v1/health', async (c), (c) => {
+app.get('/api/v1/health', (c) => {
   return c.json(makeResponse(true, { status: 'ok', version: '1.0.0' }));
 });
 
-app.get('/api/v1/scores', async (c), async (c) => {
+app.get('/api/v1/scores', async (c) => {
   const date = validDate(c);
   const ttl = date ? 300 : 5;
   let data = await getCachedOrFetch(c, scoresCacheKey(date), () => fetchGoalScores(c, date), ttl);
@@ -338,7 +338,7 @@ app.get('/api/v1/scores', async (c), async (c) => {
   return c.json(makeResponse(true, data));
 });
 
-app.get('/api/v1/competitions', async (c), async (c) => {
+app.get('/api/v1/competitions', async (c) => {
   const date = validDate(c);
   const cttl = date ? 300 : 5;
   const data = await getCachedOrFetch(c, scoresCacheKey(date), () => fetchGoalScores(c, date), cttl);
@@ -624,7 +624,7 @@ function parseTeamDetail(nextData) {
   return team;
 }
 
-app.get('/api/v1/matches/:match_id', async (c), async (c) => {
+app.get('/api/v1/matches/:match_id', async (c) => {
   const matchId = c.req.param('match_id');
   const slug = c.req.query('slug');
   if (!slug) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'slug query parameter is required' }), 400);
@@ -647,7 +647,7 @@ app.get('/api/v1/matches/:match_id', async (c), async (c) => {
   return c.json(makeResponse(true, { match: detail, cached_at: new Date().toISOString() }));
 });
 
-app.get('/api/v1/player/:player_id', async (c), async (c) => {
+app.get('/api/v1/player/:player_id', async (c) => {
   const playerId = c.req.param('player_id');
   const playerName = c.req.query('player_name');
   const detail = await getCachedOrFetch(c, `goal/player_${playerId}`, async () => {
@@ -673,7 +673,7 @@ app.get('/api/v1/player/:player_id', async (c), async (c) => {
   return c.json(makeResponse(true, { player: detail, cached_at: new Date().toISOString() }));
 });
 
-app.get('/api/v1/team/:team_id', async (c), async (c) => {
+app.get('/api/v1/team/:team_id', async (c) => {
   const teamId = c.req.param('team_id');
   const teamName = c.req.query('team_name');
   const detail = await getCachedOrFetch(c, `goal/team_${teamId}`, async () => {
@@ -698,7 +698,7 @@ app.get('/api/v1/team/:team_id', async (c), async (c) => {
 });
 
 // Root welcome + health alias
-app.get('/', async (c), (c) => c.json(makeResponse(true, {
+app.get('/', (c) => c.json(makeResponse(true, {
   message: 'KhelaDekho API Worker',
   endpoints: {
     health: '/api/v1/health',
@@ -895,7 +895,7 @@ async function fetchMatchChannels(homeUrl, slug) {
 }
 
 // List matches (from the homepage payload). ?live=true filters to live only.
-app.get('/api/v2/matches', async (c), async (c) => {
+app.get('/api/v2/matches', async (c) => {
   const homeUrl = getV2Home(c);
   const matches = await getCachedOrFetch(c, 'kickbd_matches_v4', () => fetchKickbdMatches(homeUrl), 60);
   const list = c.req.query('live') === 'true' ? matches.filter(m => m.is_live) : matches;
@@ -903,7 +903,7 @@ app.get('/api/v2/matches', async (c), async (c) => {
 });
 
 // Channel list for a match (no stream resolution — that happens on demand).
-app.get('/api/v2/matches/:slug/channels', async (c), async (c) => {
+app.get('/api/v2/matches/:slug/channels', async (c) => {
   const homeUrl = getV2Home(c);
   const slug = c.req.param('slug');
   const channels = await getCachedOrFetch(c, `kickbd_mc_${slug}`, () => fetchMatchChannels(homeUrl, slug), 120);
@@ -912,7 +912,7 @@ app.get('/api/v2/matches/:slug/channels', async (c), async (c) => {
 });
 
 // Resolve one channel's stream on demand (source_url is looked up server-side).
-app.get('/api/v2/matches/:slug/stream', async (c), async (c) => {
+app.get('/api/v2/matches/:slug/stream', async (c) => {
   const homeUrl = getV2Home(c);
   const slug = c.req.param('slug');
   const chId = c.req.query('ch');
@@ -1047,11 +1047,11 @@ async function fetchProxybdixChannels(baseUrl) {
   });
 }
 
-app.get('/api/v4/health', async (c), (c) => {
+app.get('/api/v4/health', (c) => {
   return c.json(makeResponse(true, { status: 'ok', version: '4.0.0', source: getV4Home(c) }));
 });
 
-app.get('/api/v4/channels', async (c), async (c) => {
+app.get('/api/v4/channels', async (c) => {
   const homeUrl = getV4Home(c);
   let channels = await getCachedOrFetch(c, 'proxybdix_channels', () => fetchProxybdixChannels(homeUrl), 120);
   const q = c.req.query('q');
@@ -1061,7 +1061,7 @@ app.get('/api/v4/channels', async (c), async (c) => {
   return c.json(makeResponse(true, { channels, total: channels.length, cached_at: new Date().toISOString() }));
 });
 
-app.get('/api/v4/channels/:channel_id', async (c), async (c) => {
+app.get('/api/v4/channels/:channel_id', async (c) => {
   const homeUrl = getV4Home(c);
   const channels = await getCachedOrFetch(c, 'proxybdix_channels', () => fetchProxybdixChannels(homeUrl), 120);
   const channelId = c.req.param('channel_id');
@@ -1070,7 +1070,7 @@ app.get('/api/v4/channels/:channel_id', async (c), async (c) => {
   return c.json(makeResponse(true, channel));
 });
 
-app.get('/api/v4/channels/:channel_id/stream', async (c), async (c) => {
+app.get('/api/v4/channels/:channel_id/stream', async (c) => {
   const homeUrl = getV4Home(c);
   const channels = await getCachedOrFetch(c, 'proxybdix_channels', () => fetchProxybdixChannels(homeUrl), 120);
   const channelId = c.req.param('channel_id');
@@ -1146,7 +1146,7 @@ app.get('/api/v4/proxy', async (c) => {
   }
 });
 
-app.get('/api/v4/stats', async (c), async (c) => {
+app.get('/api/v4/stats', async (c) => {
   const homeUrl = getV4Home(c);
   const channels = await getCachedOrFetch(c, 'proxybdix_channels', () => fetchProxybdixChannels(homeUrl), 120);
   let users = 0;
@@ -1276,14 +1276,14 @@ async function resolveV5Stream(sourceUrl, homeUrl) {
   };
 }
 
-app.get('/api/v5/matches', async (c), async (c) => {
+app.get('/api/v5/matches', async (c) => {
   const homeUrl = getV5Home(c);
   const matches = await getCachedOrFetch(c, 'v5_matches', () => fetchV5Matches(homeUrl), 60);
   const list = c.req.query('live') === 'true' ? matches.filter(m => m.is_live) : matches;
   return c.json(makeResponse(true, { matches: list, total: list.length, cached_at: new Date().toISOString() }));
 });
 
-app.get('/api/v5/matches/:slug/channels', async (c), async (c) => {
+app.get('/api/v5/matches/:slug/channels', async (c) => {
   const homeUrl = getV5Home(c);
   const slug = c.req.param('slug');
   const channels = await getCachedOrFetch(c, `v5_mc_${slug}`, () => fetchV5MatchChannels(homeUrl, slug), 120);
@@ -1291,7 +1291,7 @@ app.get('/api/v5/matches/:slug/channels', async (c), async (c) => {
   return c.json(makeResponse(true, { slug, channels: safe, total: safe.length, cached_at: new Date().toISOString() }));
 });
 
-app.get('/api/v5/matches/:slug/stream', async (c), async (c) => {
+app.get('/api/v5/matches/:slug/stream', async (c) => {
   const homeUrl = getV5Home(c);
   const slug = c.req.param('slug');
   const chId = c.req.query('ch');
@@ -1345,7 +1345,7 @@ async function fetchV5TVChannels(homeUrl) {
     }));
 }
 
-app.get('/api/v5/tv/channels', async (c), async (c) => {
+app.get('/api/v5/tv/channels', async (c) => {
   const homeUrl = getV5Home(c);
   if (!homeUrl) return c.json(makeResponse(false, null, { code: 'HTTP_500', message: 'V5 not configured' }), 500);
 
