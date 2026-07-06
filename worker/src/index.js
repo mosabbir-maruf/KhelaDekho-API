@@ -765,59 +765,61 @@ function kickbdDecrypt(payloadUrlEnc) {
 }
 
 // Resolve a single channel "source" URL to a playable stream + DRM.
-// kickbd /source/ pages carry an encrypted `var _p`; other hosts embed a
-// plain HLS/DASH URL. Referer/Origin are required by the source hosts.
+// Shared regex patterns for extracting stream URLs from HTML pages.
+// Matches: const streamUrl = "..." / const sourceUrl = "..." / source: "..." / file: "..." / direct URL
+const STREAM_URL_PATTERNS = [
+  /const\s+(?:streamUrl|sourceUrl)\s*=\s*['"]([^'"]+)['"]/,
+  /(?:source|file)\s*:\s*['"]([^'"]+\.(?:m3u8|mpd)[^'"]*)['"]/,
+  /https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/,
+];
+
+function extractStreamUrl(html) {
+  for (const re of STREAM_URL_PATTERNS) {
+    const m = html.match(re);
+    if (m) return m[1] || m[0];
+  }
+  return null;
+}
+
+// kickbd /source/ pages may carry an encrypted `var _p`; others embed a plain
+// HLS/DASH URL directly in the HTML. Referer/Origin are required by source hosts.
 async function resolveStream(sourceUrl, homeUrl, ctx) {
   const headers = homeUrl ? { Referer: `${homeUrl}/`, Origin: homeUrl } : {};
 
-  // If the source URL is already a playable manifest, use it directly.
   if (/\.(m3u8|mpd)(\?|$)/i.test(sourceUrl)) {
     return { stream_url: sourceUrl, stream_type: sourceUrl.includes('.mpd') ? 'dash' : 'hls' };
   }
 
-  if (sourceUrl.includes('/source/')) {
-    try {
-      const srcHtml = await fetchText(sourceUrl, headers);
-      const pMatch = srcHtml.match(/var _p\s*=\s*"([^"]+)"/);
+  try {
+    const html = await fetchText(sourceUrl, headers);
+
+    // Try encrypted kickbd payload first (/source/ URLs)
+    if (sourceUrl.includes('/source/')) {
+      const pMatch = html.match(/var _p\s*=\s*"([^"]+)"/);
       if (pMatch) {
         const decrypted = kickbdDecrypt(pMatch[1]);
         const urlMatch = decrypted.match(/window\.player\.load\('([^']+)'\)/);
-        const kidMatch = decrypted.match(/k_id='([^']+)'/);
-        const kvMatch = decrypted.match(/k_v='([^']+)'/);
         if (urlMatch) {
           const result = { stream_url: urlMatch[1], stream_type: urlMatch[1].includes('.mpd') ? 'dash' : 'hls' };
+          const kidMatch = decrypted.match(/k_id='([^']+)'/);
+          const kvMatch = decrypted.match(/k_v='([^']+)'/);
           if (kidMatch) result.drm_kid = kidMatch[1];
           if (kvMatch) result.drm_key = kvMatch[1];
           return result;
         }
       }
-      // If no encrypted payload found, fall through to generic scraping
-      // (some /source/ pages embed streamUrl directly without encryption)
-      const html = srcHtml;
-      const sMatch = html.match(/const\s+(?:streamUrl|sourceUrl)\s*=\s*['"]([^'"]+)['"]/) ||
-        html.match(/(?:source|file)\s*:\s*['"]([^'"]+\.(?:m3u8|mpd)[^'"]*)['"]/) ||
-        html.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
-      if (sMatch) {
-        const url = sMatch[1] || sMatch[0];
-        return { stream_url: url, stream_type: url.includes('.mpd') ? 'dash' : 'hls' };
-      }
-      return null;
-    } catch (e) { devError(ctx && ctx.env, 'resolveStream /source/ failed', sourceUrl, e.message); return null; }
-  }
-  try {
-    const html = await fetchText(sourceUrl, headers);
-    const sMatch = html.match(/const\s+(?:streamUrl|sourceUrl)\s*=\s*['"]([^'"]+)['"]/) ||
-      html.match(/(?:source|file)\s*:\s*['"]([^'"]+\.(?:m3u8|mpd)[^'"]*)['"]/) ||
-      html.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
-    if (!sMatch) return null;
-    const url = sMatch[1] || sMatch[0];
-    const result = { stream_url: url, stream_type: url.includes('.mpd') ? 'dash' : 'hls' };
+    }
+
+    // Generic: scrape the HTML for a plain stream URL (works for both /source/ and other hosts)
+    const streamUrl = extractStreamUrl(html);
+    if (!streamUrl) return null;
+    const result = { stream_url: streamUrl, stream_type: streamUrl.includes('.mpd') ? 'dash' : 'hls' };
     const kidMatch = html.match(/k_id['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
     const kvMatch = html.match(/k_v['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
     if (kidMatch) result.drm_kid = kidMatch[1];
     if (kvMatch) result.drm_key = kvMatch[1];
     return result;
-  } catch (e) { devError(ctx && ctx.env, 'resolveStream fallback failed', sourceUrl, e.message); return null; }
+  } catch (e) { devError(ctx && ctx.env, 'resolveStream failed', sourceUrl, e.message); return null; }
 }
 
 // RSC flight data escapes quotes; unescape to parse embedded JSON.
