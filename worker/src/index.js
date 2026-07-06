@@ -140,6 +140,17 @@ async function fetchJson(url) {
 
 // Unified cache helper with stale-while-revalidate + stampede protection
 const fetchPromises = new Map();
+
+// Opaque token → upstream URL mapping for the proxy, so upstream provider URLs
+// and auth tokens are never exposed to the client. Tokens expire after 60 s.
+const proxyTokens = new Map();
+let tokenId = 0;
+function createProxyToken(upstreamUrl) {
+  const token = ++tokenId;
+  proxyTokens.set(token, upstreamUrl);
+  setTimeout(() => proxyTokens.delete(token), 60000);
+  return token;
+}
 function cacheDomain(c) { return c.env.CACHE_INTERNAL_DOMAIN || 'kheladekho-cache.internal'; }
 function needsProxy(url, c) {
   const patterns = (c.env.PROXY_REQUIRED_PATTERNS || 'phantemlis.top,/papi/tv/playlist/').split(',');
@@ -1298,10 +1309,8 @@ app.get('/api/v5/matches/:slug/stream', rateLimiterMiddleware(100, 60), async (c
   const stream = await getCachedOrFetch(c, `v5_st_${slug}_${chId}`, () => resolveV5Stream(channel.source_url, homeUrl), 45);
   if (!stream || !stream.stream_url) return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
 
-  let streamUrl = stream.stream_url;
-  // Proxy all v5 streams — TV playlists need Referer headers, substreams have
-  // expiring tokens. The proxy fetches the manifest fresh and rewrites URLs.
-  streamUrl = `/api/v5/proxy?url=${encodeURIComponent(streamUrl)}`;
+  const token = createProxyToken(stream.stream_url);
+  const streamUrl = `/api/v5/proxy?t=${token}`;
 
   return c.json(makeResponse(true, {
     name: channel.name,
@@ -1364,7 +1373,8 @@ app.get('/api/v5/tv/channel/:id/stream', async (c) => {
     return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
   }
 
-  const streamUrl = `/api/v5/proxy?url=${encodeURIComponent(stream.stream_url)}`;
+  const token = createProxyToken(stream.stream_url);
+  const streamUrl = `/api/v5/proxy?t=${token}`;
 
   return c.json(makeResponse(true, {
     id: chId,
@@ -1374,8 +1384,9 @@ app.get('/api/v5/tv/channel/:id/stream', async (c) => {
 });
 
 app.get('/api/v5/proxy', async (c) => {
-  const url = c.req.query('url');
-  if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
+  const token = c.req.query('t') || c.req.query('url');
+  const url = token && !isNaN(Number(token)) ? proxyTokens.get(Number(token)) : token;
+  if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'Invalid proxy request' }), 400);
 
   const homeUrl = getV5Home(c);
   try {
