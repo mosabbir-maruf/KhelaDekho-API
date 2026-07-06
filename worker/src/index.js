@@ -142,14 +142,20 @@ async function fetchJson(url) {
 const fetchPromises = new Map();
 
 // Opaque token → upstream URL mapping for the proxy, so upstream provider URLs
-// and auth tokens are never exposed to the client. Tokens expire after 60 s.
+// and auth tokens are never exposed to the client. Tokens auto-expire 5 min
+// after the last access so long-running streams don't break.
 const proxyTokens = new Map();
+const proxyTokenTimers = new Map();
 let tokenId = 0;
 function createProxyToken(upstreamUrl) {
   const token = ++tokenId;
   proxyTokens.set(token, upstreamUrl);
-  setTimeout(() => proxyTokens.delete(token), 60000);
+  proxyTokenTimers.set(token, setTimeout(() => { proxyTokens.delete(token); proxyTokenTimers.delete(token); }, 300000));
   return token;
+}
+function touchProxyToken(token) {
+  const timer = proxyTokenTimers.get(token);
+  if (timer) { clearTimeout(timer); proxyTokenTimers.set(token, setTimeout(() => { proxyTokens.delete(token); proxyTokenTimers.delete(token); }, 300000)); }
 }
 function cacheDomain(c) { return c.env.CACHE_INTERNAL_DOMAIN || 'kheladekho-cache.internal'; }
 function needsProxy(url, c) {
@@ -1414,7 +1420,9 @@ app.get('/api/v5/tv/channel/:id/stream', async (c) => {
 
 app.get('/api/v5/proxy', async (c) => {
   const token = c.req.query('t') || c.req.query('url');
-  const url = token && !isNaN(Number(token)) ? proxyTokens.get(Number(token)) : token;
+  const isTokenBased = token && !isNaN(Number(token));
+  const url = isTokenBased ? proxyTokens.get(Number(token)) : token;
+  if (isTokenBased) touchProxyToken(Number(token));
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'Invalid proxy request' }), 400);
 
   const homeUrl = getV5Home(c);

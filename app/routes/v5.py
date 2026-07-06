@@ -39,7 +39,9 @@ _HOME = settings.v5_home_url.rstrip("/")
 _PROXY_BASE = "/api/v5/proxy?url="
 
 # Opaque token -> upstream URL mapping, so upstream provider URLs and auth
-# tokens are never exposed to the client. Tokens expire after 60 seconds.
+# tokens are never exposed to the client. Tokens expire 5 minutes after the
+# last access so long-running streams don't break.
+_TOKEN_TTL = 300
 _proxy_tokens: dict[int, tuple[str, float]] = {}
 _token_lock = threading.Lock()
 _token_id = 0
@@ -51,12 +53,6 @@ def _create_proxy_token(upstream_url: str) -> int:
         _token_id += 1
         tid = _token_id
         _proxy_tokens[tid] = (upstream_url, time.time())
-    # Clean expired tokens every 100 inserts (don't bother with a background thread)
-    if _token_id % 100 == 0:
-        now = time.time()
-        expired = [k for k, (_, t) in _proxy_tokens.items() if now - t > 60]
-        for k in expired:
-            _proxy_tokens.pop(k, None)
     return tid
 
 
@@ -69,9 +65,11 @@ def _resolve_token(token: str | None) -> str | None:
         return None
     with _token_lock:
         entry = _proxy_tokens.get(tid)
-    if not entry:
-        return None
-    return entry[0]
+        if not entry:
+            return None
+        # Extend TTL on each access (touch)
+        _proxy_tokens[tid] = (entry[0], time.time())
+        return entry[0]
 
 
 # ---- Match endpoints ----
