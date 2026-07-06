@@ -652,8 +652,19 @@ app.get('/api/v1/matches/:match_id', rateLimiterMiddleware(60, 60), async (c) =>
   const slug = c.req.query('slug');
   if (!slug) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'slug query parameter is required' }), 400);
   const detail = await getCachedOrFetch(c, `goal/match_${matchId}`, async () => {
-    let html;
-    try { html = await fetchText(`${providerBase(c)}/en-in/match/${slug}/${matchId}`); } catch { return null; }
+    const base = providerBase(c);
+    const urls = [
+      `${base}/en-in/match/${slug}/${matchId}`,
+      `${base}/en/match/${slug}/${matchId}`,
+      `${base}/en-in/match/${matchId}`,
+      `${base}/en/match/${matchId}`,
+    ];
+    let html = null;
+    for (const url of urls) {
+      if (html) break;
+      try { html = await fetchText(url); } catch {}
+    }
+    if (!html) return null;
     const nd = extractNextData(html);
     return nd ? parseMatchDetail(nd) : null;
   }, 30);
