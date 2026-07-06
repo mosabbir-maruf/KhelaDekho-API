@@ -656,8 +656,6 @@ app.get('/api/v1/matches/:match_id', rateLimiterMiddleware(60, 60), async (c) =>
     const urls = [
       `${base}/en-in/match/${slug}/${matchId}`,
       `${base}/en/match/${slug}/${matchId}`,
-      `${base}/en-in/match/${matchId}`,
-      `${base}/en/match/${matchId}`,
     ];
     let html = null;
     for (const url of urls) {
@@ -680,10 +678,11 @@ app.get('/api/v1/player/:player_id', rateLimiterMiddleware(60, 60), async (c) =>
     const slug = playerName ? toSlug(playerName) : '';
     const urls = [
       `${base}/en/player/${playerId}`,
-      `${base}/en-in/player/${slug}/${playerId}`,
-      `${base}/en/player/${slug}/${playerId}`,
     ];
-    if (slug) urls.push(`${base}/en-in/players/${slug}/${playerId}`);
+    if (slug) {
+      urls.push(`${base}/en/player/${slug}/${playerId}`);
+      urls.push(`${base}/en-in/player/${slug}/${playerId}`);
+    }
     let html = null;
     for (const url of urls) {
       if (html) break;
@@ -703,13 +702,11 @@ app.get('/api/v1/team/:team_id', rateLimiterMiddleware(60, 60), async (c) => {
   const detail = await getCachedOrFetch(c, `goal/team_${teamId}`, async () => {
     const base = providerBase(c);
     const slug = teamName ? toSlug(teamName) : '';
-    const urls = [
-      `${base}/en/team/${teamId}`,
-      `${base}/en-in/team/${slug}/${teamId}`,
-      `${base}/en/team/${slug}/${teamId}`,
-      `${base}/en/team/${teamId}/${slug}`,
-    ];
-    if (slug) urls.push(`${base}/en-in/teams/${slug}/${teamId}`);
+    const urls = [`${base}/en/team/${teamId}`];
+    if (slug) {
+      urls.push(`${base}/en/team/${slug}/${teamId}`);
+      urls.push(`${base}/en-in/team/${slug}/${teamId}`);
+    }
     let html = null;
     for (const url of urls) {
       if (html) break;
