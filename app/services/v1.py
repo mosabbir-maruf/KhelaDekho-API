@@ -34,8 +34,9 @@ from app.services.cache import cache
 
 logger = structlog.get_logger(__name__)
 
-# Base URL comes from env (V1_HOME_URL), never hardcoded. All paths are relative
-# to ``settings.v1_home_url``.
+if not settings.v1_home_url:
+    raise ValueError("KHELADEKHO_V1_HOME_URL setting is required")
+
 _PROVIDER_BASE = settings.v1_home_url.rstrip("/")
 _GOAL_LIVE_SCORES_URL = f"{_PROVIDER_BASE}/en/live-scores"
 _GOAL_FIXTURES_URL = f"{_PROVIDER_BASE}/en/fixtures/{{date}}"
@@ -164,18 +165,16 @@ async def _fetch_html(url: str) -> str | None:
             resp.raise_for_status()
             return resp.text
     except Exception as e:
-        logger.error("goal_fetch_failed", url=url, error=str(e))
+        logger.error("v1_fetch_failed", url=url, error=str(e))
         return None
 
-
-# ---- Scores (list) ----
 
 def _parse_scores_from_next_data(next_data: dict) -> GoalScoresResponse:
     competitions: list[GoalCompetition] = []
     try:
         live_scores = next_data["props"]["pageProps"]["content"]["liveScores"]
     except (KeyError, TypeError):
-        logger.warning("goal_live_scores_not_found_in_next_data")
+        logger.warning("v1_live_scores_not_found_in_next_data")
         return GoalScoresResponse()
 
     total_matches = 0
@@ -241,21 +240,19 @@ async def fetch_goal_scores(date: str | None = None) -> GoalScoresResponse:
             return GoalScoresResponse()
         result = _parse_scores_from_next_data(nd)
 
-    logger.info("goal_scores_fetched", competitions=len(result.competitions), total_matches=result.total_matches)
+    logger.info("v1_scores_fetched", competitions=len(result.competitions), total_matches=result.total_matches)
     return result
 
 
 async def get_cached_goal_scores(date: str | None = None) -> GoalScoresResponse:
     ident = date or "today"
     return await cache.get_or_set(
-        prefix="goal",
+        prefix="v1_scores",
         identifier=f"scores_{ident}",
         factory=lambda: fetch_goal_scores(date),
         ttl=_CACHE_TTL_SCORES,
     )
 
-
-# ---- Match Detail ----
 
 def _parse_match_detail_from_next_data(next_data: dict) -> GoalMatchDetail | None:
     try:
@@ -312,7 +309,6 @@ def _parse_match_detail_from_next_data(next_data: dict) -> GoalMatchDetail | Non
         last_updated_at=_parse_iso(raw.get("lastUpdatedAt", "")),
     )
 
-    # Events
     for e in raw.get("events") or []:
         typename = e.get("__typename", "")
         etype = e.get("type", "")
@@ -336,7 +332,6 @@ def _parse_match_detail_from_next_data(next_data: dict) -> GoalMatchDetail | Non
         )
         detail.events.append(event)
 
-    # Scorers
     scorers_raw = raw.get("scorers") or {}
     for s in scorers_raw.get("teamA", []):
         p = _parse_player(s.get("player"))
@@ -355,12 +350,10 @@ def _parse_match_detail_from_next_data(next_data: dict) -> GoalMatchDetail | Non
                 scorer=p,
             ))
 
-    # Red cards
     red = raw.get("redCards") or {}
     detail.red_cards_team_a = red.get("teamA", 0)
     detail.red_cards_team_b = red.get("teamB", 0)
 
-    # Stats
     raw_stats = raw.get("stats")
     if raw_stats:
         stats = GoalMatchStats()
@@ -384,10 +377,8 @@ def _parse_match_detail_from_next_data(next_data: dict) -> GoalMatchDetail | Non
             setattr(stats, model_key, parsed)
         detail.stats = stats
 
-    # Lineups (from match object, NOT tabsInfo which is lazy-loaded)
     detail.lineups = _parse_lineups_from_match(raw)
 
-    # Commentary (filter out lazy-loaded GraphQL placeholders)
     for c in (content.get("tabsInfo") or {}).get("commentary") or []:
         if len(c) <= 1 and not c.get("text") and not c.get("player"):
             continue
@@ -399,7 +390,6 @@ def _parse_match_detail_from_next_data(next_data: dict) -> GoalMatchDetail | Non
             side=c.get("side"),
         ))
 
-    # Fallback: generate commentary from match events if real commentary unavailable
     if not detail.commentary:
         sorted_events = sorted(detail.events, key=lambda e: (e.period.minute if e.period else 999, e.period.extra if e.period else 0))
         side_label = {None: "", "TEAM_A": f" ({detail.team_a.name})", "TEAM_B": f" ({detail.team_b.name})"}
@@ -445,7 +435,6 @@ def _parse_match_detail_from_next_data(next_data: dict) -> GoalMatchDetail | Non
                     side=e.side,
                 ))
 
-    # Top players
     top_players_raw = (content.get("tabsInfo") or {}).get("topPlayers")
     if isinstance(top_players_raw, dict):
         for side_key in ("teamA", "teamB"):
@@ -459,7 +448,6 @@ def _parse_match_detail_from_next_data(next_data: dict) -> GoalMatchDetail | Non
                         team_side="TEAM_A" if side_key == "teamA" else "TEAM_B",
                     ))
 
-    # Fallback: generate top players from lineup scores
     if not detail.top_players and detail.lineups:
         for team_key, team_side in [("team_a", "TEAM_A"), ("team_b", "TEAM_B")]:
             t = getattr(detail.lineups, team_key)
@@ -474,7 +462,6 @@ def _parse_match_detail_from_next_data(next_data: dict) -> GoalMatchDetail | Non
                         team_side=team_side,
                     ))
 
-    # H2H
     h2h_raw = content.get("h2h")
     if h2h_raw:
         stats = h2h_raw.get("stats") or {}
@@ -538,20 +525,18 @@ async def fetch_goal_match_detail(slug: str, match_id: str) -> GoalMatchDetail |
         return None
     detail = _parse_match_detail_from_next_data(next_data)
     if detail:
-        logger.info("goal_match_fetched", match_id=match_id, status=detail.status)
+        logger.info("v1_match_fetched", match_id=match_id, status=detail.status)
     return detail
 
 
 async def get_cached_goal_match_detail(slug: str, match_id: str) -> GoalMatchDetail | None:
     return await cache.get_or_set(
-        prefix="goal_match",
+        prefix="v1_match",
         identifier=match_id,
         factory=lambda: fetch_goal_match_detail(slug, match_id),
         ttl=_CACHE_TTL_MATCH,
     )
 
-
-# ---- Player Detail ----
 
 _CACHE_TTL_PLAYER = 300
 
@@ -640,7 +625,7 @@ def _parse_player_detail_from_next_data(next_data: dict) -> GoalPlayerDetail | N
         )
         player.stats.append(season)
 
-    logger.info("goal_player_fetched", player_id=player_id, name=player.name)
+    logger.info("v1_player_fetched", player_id=player_id, name=player.name)
     return player
 
 
@@ -661,14 +646,12 @@ async def fetch_goal_player_detail(player_id: str, player_name: str | None = Non
 
 async def get_cached_goal_player_detail(player_id: str, player_name: str | None = None) -> GoalPlayerDetail | None:
     return await cache.get_or_set(
-        prefix="goal_player",
+        prefix="v1_player",
         identifier=player_id,
         factory=lambda: fetch_goal_player_detail(player_id, player_name),
         ttl=_CACHE_TTL_PLAYER,
     )
 
-
-# ---- Team Detail ----
 
 _CACHE_TTL_TEAM = 300
 
@@ -699,7 +682,7 @@ def _parse_team_detail_from_next_data(next_data: dict) -> GoalTeamDetail | None:
         parsed = _parse_match(match_raw)
         team.recent_matches.append(parsed)
 
-    logger.info("goal_team_fetched", team_id=team_id, name=team.name, matches=len(team.recent_matches))
+    logger.info("v1_team_fetched", team_id=team_id, name=team.name, matches=len(team.recent_matches))
     return team
 
 
@@ -720,7 +703,7 @@ async def fetch_goal_team_detail(team_id: str, team_name: str | None = None) -> 
 
 async def get_cached_goal_team_detail(team_id: str, team_name: str | None = None) -> GoalTeamDetail | None:
     return await cache.get_or_set(
-        prefix="goal_team",
+        prefix="v1_team",
         identifier=team_id,
         factory=lambda: fetch_goal_team_detail(team_id, team_name),
         ttl=_CACHE_TTL_TEAM,

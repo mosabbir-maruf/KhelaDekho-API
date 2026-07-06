@@ -17,7 +17,7 @@ from app.models.goal_scores import (
     GoalScoresResponse,
     GoalTeamDetailResponse,
 )
-from app.services.goal_scores import (
+from app.services.v1 import (
     get_cached_goal_match_detail,
     get_cached_goal_player_detail,
     get_cached_goal_scores,
