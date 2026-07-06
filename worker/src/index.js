@@ -779,21 +779,34 @@ async function resolveStream(sourceUrl, homeUrl, ctx) {
     try {
       const srcHtml = await fetchText(sourceUrl, headers);
       const pMatch = srcHtml.match(/var _p\s*=\s*"([^"]+)"/);
-      if (!pMatch) return null;
-      const decrypted = kickbdDecrypt(pMatch[1]);
-      const urlMatch = decrypted.match(/window\.player\.load\('([^']+)'\)/);
-      const kidMatch = decrypted.match(/k_id='([^']+)'/);
-      const kvMatch = decrypted.match(/k_v='([^']+)'/);
-      if (!urlMatch) return null;
-      const result = { stream_url: urlMatch[1], stream_type: urlMatch[1].includes('.mpd') ? 'dash' : 'hls' };
-      if (kidMatch) result.drm_kid = kidMatch[1];
-      if (kvMatch) result.drm_key = kvMatch[1];
-      return result;
+      if (pMatch) {
+        const decrypted = kickbdDecrypt(pMatch[1]);
+        const urlMatch = decrypted.match(/window\.player\.load\('([^']+)'\)/);
+        const kidMatch = decrypted.match(/k_id='([^']+)'/);
+        const kvMatch = decrypted.match(/k_v='([^']+)'/);
+        if (urlMatch) {
+          const result = { stream_url: urlMatch[1], stream_type: urlMatch[1].includes('.mpd') ? 'dash' : 'hls' };
+          if (kidMatch) result.drm_kid = kidMatch[1];
+          if (kvMatch) result.drm_key = kvMatch[1];
+          return result;
+        }
+      }
+      // If no encrypted payload found, fall through to generic scraping
+      // (some /source/ pages embed streamUrl directly without encryption)
+      const html = srcHtml;
+      const sMatch = html.match(/const\s+(?:streamUrl|sourceUrl)\s*=\s*['"]([^'"]+)['"]/) ||
+        html.match(/(?:source|file)\s*:\s*['"]([^'"]+\.(?:m3u8|mpd)[^'"]*)['"]/) ||
+        html.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
+      if (sMatch) {
+        const url = sMatch[1] || sMatch[0];
+        return { stream_url: url, stream_type: url.includes('.mpd') ? 'dash' : 'hls' };
+      }
+      return null;
     } catch (e) { devError(ctx && ctx.env, 'resolveStream /source/ failed', sourceUrl, e.message); return null; }
   }
   try {
     const html = await fetchText(sourceUrl, headers);
-    const sMatch = html.match(/const streamUrl\s*=\s*['"]([^'"]+)['"]/) ||
+    const sMatch = html.match(/const\s+(?:streamUrl|sourceUrl)\s*=\s*['"]([^'"]+)['"]/) ||
       html.match(/(?:source|file)\s*:\s*['"]([^'"]+\.(?:m3u8|mpd)[^'"]*)['"]/) ||
       html.match(/https?:\/\/[^"'<>\s]+\.(?:m3u8|mpd)[^"'<>\s]*/);
     if (!sMatch) return null;
