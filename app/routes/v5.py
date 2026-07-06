@@ -14,7 +14,7 @@ from app.models.v2 import (
     MatchChannelListResponse,
     StreamResponse,
 )
-from app.services.damitv import (
+from app.services.v5 import (
     get_cached_match_channels,
     get_cached_matches,
     get_cached_stream,

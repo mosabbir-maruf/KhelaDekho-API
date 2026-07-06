@@ -1,4 +1,4 @@
-"""DAMI-TV (V5) Match-centric Scraping and Stream Resolution.
+"""V5 Match-centric Scraping and Stream Resolution.
 """
 from __future__ import annotations
 
@@ -54,7 +54,6 @@ async def fetch_matches() -> list[KickbdMatch]:
 
     out: list[KickbdMatch] = []
     seen_slugs = set()
-    now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
     for m in data:
         if not isinstance(m, dict) or not m.get("id"):
@@ -86,7 +85,7 @@ async def fetch_matches() -> list[KickbdMatch]:
 
 
 async def get_cached_matches() -> list[KickbdMatch]:
-    return await cache.get_or_set(prefix="damitv", identifier="matches", factory=fetch_matches, ttl=60)
+    return await cache.get_or_set(prefix="v5_service", identifier="matches", factory=fetch_matches, ttl=60)
 
 
 async def fetch_match_channels(slug: str) -> list[dict]:
@@ -95,7 +94,6 @@ async def fetch_match_channels(slug: str) -> list[dict]:
     if not match_item:
         return []
 
-    # Get fresh football matches details to retrieve tvChannels
     data = await _fetch_json(f"{_API_BASE}/matches/football")
     if not isinstance(data, list):
         return []
@@ -113,7 +111,6 @@ async def fetch_match_channels(slug: str) -> list[dict]:
     tv_channels = raw_match.get("tvChannels") or []
     substreams = raw_match.get("substreams") or []
 
-    # Format tvChannels
     for ch in tv_channels:
         if isinstance(ch, dict) and ch.get("id"):
             channels.append({
@@ -123,7 +120,6 @@ async def fetch_match_channels(slug: str) -> list[dict]:
                 "source_url": f"{_API_BASE}/tv/resolve/dlhd-{ch['id']}",
             })
 
-    # Format substreams
     for sub in substreams:
         if isinstance(sub, dict) and sub.get("id"):
             channels.append({
@@ -133,7 +129,6 @@ async def fetch_match_channels(slug: str) -> list[dict]:
                 "source_url": f"{_API_BASE}/tv/resolve/{sub['id']}",
             })
 
-    # Fallback to single play source if no channels exist
     if not channels and raw_match.get("embedUrl"):
         channels.append({
             "id": f"embed-{slug}",
@@ -147,7 +142,7 @@ async def fetch_match_channels(slug: str) -> list[dict]:
 
 async def get_cached_match_channels(slug: str) -> list[dict]:
     return await cache.get_or_set(
-        prefix="damitv_mc", identifier=slug, factory=lambda: fetch_match_channels(slug), ttl=120
+        prefix="v5_mc", identifier=slug, factory=lambda: fetch_match_channels(slug), ttl=120
     )
 
 
@@ -156,7 +151,6 @@ def public_channels(raw: list[dict]) -> list[MatchChannel]:
 
 
 async def resolve_stream(source_url: str) -> dict | None:
-    # Handle direct resolve API endpoints
     if "/tv/resolve/" in source_url:
         data = await _fetch_json(source_url)
         if isinstance(data, dict) and data.get("success") and data.get("stream"):
@@ -175,6 +169,6 @@ async def resolve_stream(source_url: str) -> dict | None:
 
 async def get_cached_stream(slug: str, ch_id: str, source_url: str) -> dict | None:
     return await cache.get_or_set(
-        prefix="damitv_st", identifier=f"{slug}:{ch_id}",
+        prefix="v5_st", identifier=f"{slug}:{ch_id}",
         factory=lambda: resolve_stream(source_url), ttl=45,
     )
