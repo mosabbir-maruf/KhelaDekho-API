@@ -767,8 +767,14 @@ function kickbdDecrypt(payloadUrlEnc) {
 // Resolve a single channel "source" URL to a playable stream + DRM.
 // kickbd /source/ pages carry an encrypted `var _p`; other hosts embed a
 // plain HLS/DASH URL. Referer/Origin are required by the source hosts.
-async function resolveStream(sourceUrl, homeUrl) {
+async function resolveStream(sourceUrl, homeUrl, ctx) {
   const headers = homeUrl ? { Referer: `${homeUrl}/`, Origin: homeUrl } : {};
+
+  // If the source URL is already a playable manifest, use it directly.
+  if (/\.(m3u8|mpd)(\?|$)/i.test(sourceUrl)) {
+    return { stream_url: sourceUrl, stream_type: sourceUrl.includes('.mpd') ? 'dash' : 'hls' };
+  }
+
   if (sourceUrl.includes('/source/')) {
     try {
       const srcHtml = await fetchText(sourceUrl, headers);
@@ -783,7 +789,7 @@ async function resolveStream(sourceUrl, homeUrl) {
       if (kidMatch) result.drm_kid = kidMatch[1];
       if (kvMatch) result.drm_key = kvMatch[1];
       return result;
-    } catch { return null; }
+    } catch (e) { devError(ctx && ctx.env, 'resolveStream /source/ failed', sourceUrl, e.message); return null; }
   }
   try {
     const html = await fetchText(sourceUrl, headers);
@@ -798,7 +804,7 @@ async function resolveStream(sourceUrl, homeUrl) {
     if (kidMatch) result.drm_kid = kidMatch[1];
     if (kvMatch) result.drm_key = kvMatch[1];
     return result;
-  } catch { return null; }
+  } catch (e) { devError(ctx && ctx.env, 'resolveStream fallback failed', sourceUrl, e.message); return null; }
 }
 
 // RSC flight data escapes quotes; unescape to parse embedded JSON.
@@ -925,7 +931,7 @@ app.get('/api/v2/matches/:slug/stream', rateLimiterMiddleware(100, 60), async (c
   const channels = await getCachedOrFetch(c, `kickbd_mc_${slug}`, () => fetchMatchChannels(homeUrl, slug), 120);
   const channel = channels.find(ch => ch.id === chId);
   if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
-  const stream = await getCachedOrFetch(c, `kickbd_st_${slug}_${chId}`, () => resolveStream(channel.source_url, homeUrl), 45);
+  const stream = await getCachedOrFetch(c, `kickbd_st_${slug}_${chId}`, () => resolveStream(channel.source_url, homeUrl, c), 45);
   if (!stream || !stream.stream_url) return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
   return c.json(makeResponse(true, {
     name: channel.name,
