@@ -1283,6 +1283,67 @@ app.get('/api/v5/matches/:slug/stream', rateLimiterMiddleware(100, 60), async (c
   }));
 });
 
+// =========================================================================
+// V5 — TV channel list & stream resolution (DLHD)
+// =========================================================================
+
+function detectChannelCategory(name) {
+  const n = ' ' + name.toLowerCase() + ' ';
+  if (/sport|espn|sky\s?sport|fox\s?sport|bein|dazn|nba|nfl|nhl|mlb|tnt\s?sport|premier|football|cricket|tennis|golf|wwe|ufc|racing|motogp|formula|\bf1\b|supersport|willow|optus/i.test(n)) return 'Sports';
+  if (/news|cnn|bbc\s?news|fox\s?news|sky\s?news|al\s?jazeera|msnbc|cnbc|gb\s?news/i.test(n)) return 'News';
+  if (/kids|cartoon|disney|nick|baby|boomerang|pbs\s?kids/i.test(n)) return 'Kids';
+  if (/movie|cinema|hbo|\bamc\b|film|starz|showtime|cinemax|paramount/i.test(n)) return 'Entertainment';
+  if (/music|mtv|vh1|radio|hits|rhythm|beat|concert|band|billboard/i.test(n)) return 'Music';
+  return 'General';
+}
+
+async function fetchV5TVChannels(homeUrl) {
+  const data = await fetchJson(`${homeUrl}/data/dlhd-channels.json?v=7`);
+  if (!data || !Array.isArray(data.channels)) return [];
+
+  return data.channels
+    .filter(ch => ch && ch.id && ch.name)
+    .map(ch => ({
+      id: `dlhd-${ch.id}`,
+      name: ch.name.trim(),
+      image: ch.image || '',
+      country: ch.country || 'intl',
+      category: detectChannelCategory(ch.name),
+    }));
+}
+
+app.get('/api/v5/tv/channels', rateLimiterMiddleware(100, 60), async (c) => {
+  const homeUrl = getV5Home(c);
+  if (!homeUrl) return c.json(makeResponse(false, null, { code: 'HTTP_500', message: 'V5 not configured' }), 500);
+
+  const channels = await getCachedOrFetch(c, 'v5_tv_channels', () => fetchV5TVChannels(homeUrl), 120);
+  return c.json(makeResponse(true, { channels, total: channels.length, cached_at: new Date().toISOString() }));
+});
+
+app.get('/api/v5/tv/channel/:id/stream', async (c) => {
+  const homeUrl = getV5Home(c);
+  if (!homeUrl) return c.json(makeResponse(false, null, { code: 'HTTP_500', message: 'V5 not configured' }), 500);
+
+  const chId = c.req.param('id');
+  if (!chId) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'Channel ID required' }), 400);
+
+  const dlhdId = chId.replace('dlhd-', '');
+  const resolveUrl = `${homeUrl}/papi/tv/resolve/dlhd-${dlhdId}`;
+
+  const stream = await resolveV5Stream(resolveUrl, homeUrl);
+  if (!stream || !stream.stream_url) {
+    return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
+  }
+
+  const streamUrl = `/api/v5/proxy?url=${encodeURIComponent(stream.stream_url)}`;
+
+  return c.json(makeResponse(true, {
+    id: chId,
+    stream_url: streamUrl,
+    stream_type: stream.stream_type,
+  }));
+});
+
 app.get('/api/v5/proxy', async (c) => {
   const url = c.req.query('url');
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'url parameter required' }), 400);
