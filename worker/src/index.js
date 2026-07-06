@@ -664,9 +664,18 @@ app.get('/api/v1/player/:player_id', rateLimiterMiddleware(60, 60), async (c) =>
   const playerName = c.req.query('player_name');
   const detail = await getCachedOrFetch(c, `goal/player_${playerId}`, async () => {
     const base = providerBase(c);
+    const slug = playerName ? toSlug(playerName) : '';
+    const urls = [
+      `${base}/en/player/${playerId}`,
+      `${base}/en-in/player/${slug}/${playerId}`,
+      `${base}/en/player/${slug}/${playerId}`,
+    ];
+    if (slug) urls.push(`${base}/en-in/players/${slug}/${playerId}`);
     let html = null;
-    try { html = await fetchText(`${base}/en/player/${playerId}`); } catch {}
-    if (!html && playerName) { try { html = await fetchText(`${base}/en/player/${toSlug(playerName)}/${playerId}`); } catch {} }
+    for (const url of urls) {
+      if (html) break;
+      try { html = await fetchText(url); } catch {}
+    }
     if (!html) return null;
     const nd = extractNextData(html);
     return nd ? parsePlayerDetail(nd) : null;
@@ -680,9 +689,19 @@ app.get('/api/v1/team/:team_id', rateLimiterMiddleware(60, 60), async (c) => {
   const teamName = c.req.query('team_name');
   const detail = await getCachedOrFetch(c, `goal/team_${teamId}`, async () => {
     const base = providerBase(c);
+    const slug = teamName ? toSlug(teamName) : '';
+    const urls = [
+      `${base}/en/team/${teamId}`,
+      `${base}/en-in/team/${slug}/${teamId}`,
+      `${base}/en/team/${slug}/${teamId}`,
+      `${base}/en/team/${teamId}/${slug}`,
+    ];
+    if (slug) urls.push(`${base}/en-in/teams/${slug}/${teamId}`);
     let html = null;
-    try { html = await fetchText(`${base}/en/team/${teamId}`); } catch {}
-    if (!html && teamName) { try { html = await fetchText(`${base}/en/team/${toSlug(teamName)}/${teamId}`); } catch {} }
+    for (const url of urls) {
+      if (html) break;
+      try { html = await fetchText(url); } catch {}
+    }
     if (!html) return null;
     const nd = extractNextData(html);
     return nd ? parseTeamDetail(nd) : null;
