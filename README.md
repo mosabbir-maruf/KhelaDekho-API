@@ -87,16 +87,24 @@ stream is resolved lazily on demand.
 | `GET /api/v4/proxy?url=` | CORS/segment proxy |
 | `GET /api/v4/stats` | Platform metrics |
 
-### V5 — Match-centric Streams
+### V5 — Match-centric Streams + TV Channel List
 Match-first API: list live/upcoming matches, then browse channels per match and
 resolve streams on demand. Supports both TV channels and substreams.
+
+Also provides a standalone DLHD 24/7 TV channel list (878+ channels) with auto-
+categorization (Sports, News, Kids, Entertainment, Music, General).
 
 | Endpoint | Description |
 |----------|-------------|
 | `GET /api/v5/matches` | Match list (football) |
 | `GET /api/v5/matches/{slug}/channels` | Channels + substreams for a match |
 | `GET /api/v5/matches/{slug}/stream?ch={id}` | Resolve one channel/substream |
+| `GET /api/v5/tv/channels` | DLHD 24/7 TV channel list (878+ channels) |
+| `GET /api/v5/tv/channel/{id}/stream` | Resolve a DLHD channel stream |
 | `GET /api/v5/proxy?url=` | CORS/Referer proxy for TV manifests |
+
+All v5 streams are routed through the proxy to keep Referer/Origin headers fresh
+and rewrite tokenized manifests. TV channel streams have no rate limit.
 
 ---
 
