@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+import time
 import urllib.parse
 
 import httpx
@@ -36,6 +38,43 @@ if not settings.v5_home_url:
 _HOME = settings.v5_home_url.rstrip("/")
 _PROXY_BASE = "/api/v5/proxy?url="
 
+# Opaque token -> upstream URL mapping, so upstream provider URLs and auth
+# tokens are never exposed to the client. Tokens expire after 60 seconds.
+_proxy_tokens: dict[int, tuple[str, float]] = {}
+_token_lock = threading.Lock()
+_token_id = 0
+
+
+def _create_proxy_token(upstream_url: str) -> int:
+    global _token_id
+    with _token_lock:
+        _token_id += 1
+        tid = _token_id
+        _proxy_tokens[tid] = (upstream_url, time.time())
+    # Clean expired tokens every 100 inserts (don't bother with a background thread)
+    if _token_id % 100 == 0:
+        now = time.time()
+        expired = [k for k, (_, t) in _proxy_tokens.items() if now - t > 60]
+        for k in expired:
+            _proxy_tokens.pop(k, None)
+    return tid
+
+
+def _resolve_token(token: str | None) -> str | None:
+    if not token:
+        return None
+    try:
+        tid = int(token)
+    except (ValueError, TypeError):
+        return None
+    with _token_lock:
+        entry = _proxy_tokens.get(tid)
+    if not entry:
+        return None
+    return entry[0]
+
+
+# ---- Match endpoints ----
 
 @router.get(
     "/matches",
@@ -79,23 +118,21 @@ async def get_match_stream(slug: str, ch: str = Query(..., min_length=1)):
     stream = await get_cached_stream(slug, ch, channel["source_url"])
     if not stream or not stream.get("stream_url"):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Stream unavailable")
-    
-    stream_url = stream['stream_url']
-    # Check if we need to proxy the initial playlist request (Referer checks)
-    if "phantemlis.top" in stream_url or "/papi/tv/playlist/" in stream_url:
-        stream_url = f"{_PROXY_BASE}{urllib.parse.quote(stream_url, safe='')}"
-        
+
+    token = _create_proxy_token(stream["stream_url"])
     return StandardResponse(
         success=True,
         data=StreamResponse(
             name=channel["name"],
-            stream_url=stream_url,
+            stream_url=f"/api/v5/proxy?t={token}",
             stream_type=stream.get("stream_type", "hls"),
             drm_kid=stream.get("drm_kid"),
             drm_key=stream.get("drm_key"),
         ),
     )
 
+
+# ---- TV channel endpoints ----
 
 @router.get(
     "/tv/channels",
@@ -118,12 +155,14 @@ async def get_tv_channel_stream(channel_id: str):
     stream = await resolve_tv_channel_stream(channel_id)
     if not stream or not stream.get("stream_url"):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Stream unavailable")
-    stream_url = f"{_PROXY_BASE}{urllib.parse.quote(stream['stream_url'], safe='')}"
+    token = _create_proxy_token(stream["stream_url"])
     return StandardResponse(
         success=True,
-        data=TVStreamResponse(id=channel_id, stream_url=stream_url, stream_type=stream.get("stream_type", "hls")),
+        data=TVStreamResponse(id=channel_id, stream_url=f"/api/v5/proxy?t={token}", stream_type=stream.get("stream_type", "hls")),
     )
 
+
+# ---- Proxy ----
 
 _PROXY_FORWARD_HEADERS = {
     "User-Agent": settings.user_agent,
@@ -135,41 +174,43 @@ _PROXY_FORWARD_HEADERS = {
 
 
 @router.get("/proxy")
-async def proxy_stream(url: str = Query(..., min_length=10)):
+async def proxy_stream(t: str | None = Query(None), url: str | None = Query(None)):
+    upstream = _resolve_token(t) or url
+    if not upstream or len(upstream) < 10:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid proxy request")
+
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
-            resp = await client.get(url, headers=_PROXY_FORWARD_HEADERS, follow_redirects=True)
+            resp = await client.get(upstream, headers=_PROXY_FORWARD_HEADERS, follow_redirects=True)
             content = resp.content
             content_type = resp.headers.get("content-type", "application/octet-stream")
-            
-            # Rewrite relative track references inside index.m3u8 manifests so they point to the correct CDN domain absolute paths
-            if url.endswith(".m3u8") or "index.m3u8" in url or "playlist" in url:
-                parsed_url = urllib.parse.urlparse(url)
-                base_path = parsed_url.path.rsplit("/", 1)[0]
-                base_domain_url = f"{parsed_url.scheme}://{parsed_url.netloc}{base_path}"
-                
+
+            # HLS manifest rewriting
+            if upstream.endswith(".m3u8") or "index.m3u8" in upstream or "playlist" in upstream:
+                parsed = urllib.parse.urlparse(upstream)
+                base_domain = f"{parsed.scheme}://{parsed.netloc}{parsed.path.rsplit('/', 1)[0]}"
                 body = content.decode("utf-8", errors="ignore")
                 lines = []
                 for line in body.splitlines():
                     trimmed = line.strip()
                     if trimmed and not trimmed.startswith("#") and not trimmed.startswith("http") and not trimmed.startswith("/"):
-                        # Re-route tracks to proxy too if it matches phantemlis.top domains
-                        if "phantemlis.top" in url:
-                            full_track = f"{base_domain_url}/{trimmed}"
-                            lines.append(f"{_PROXY_BASE}{urllib.parse.quote(full_track, safe='')}")
-                        else:
-                            lines.append(f"{base_domain_url}/{trimmed}")
+                        full = f"{base_domain}/{trimmed}"
+                        lines.append(f"{_PROXY_BASE}{urllib.parse.quote(full, safe='')}")
                     else:
                         lines.append(line)
                 content = "\n".join(lines).encode("utf-8")
-                
+
         except Exception as e:
-            logger.error("v5_proxy_fetch_failed", url=url, error=str(e))
+            logger.error("v5_proxy_fetch_failed", upstream=upstream, error=str(e))
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch stream")
 
+    is_segment = any(upstream.endswith(ext) for ext in (".ts", ".mp4", ".m4s")) or "/seg_" in upstream or "/segment" in upstream or "/init" in upstream
     return Response(
         content=content,
         status_code=resp.status_code,
         media_type=content_type,
-        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=5"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": f"public, max-age={'86400' if is_segment else '5'}",
+        },
     )

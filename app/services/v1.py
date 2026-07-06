@@ -42,10 +42,13 @@ _GOAL_LIVE_SCORES_URL = f"{_PROVIDER_BASE}/en/live-scores"
 _GOAL_FIXTURES_URL = f"{_PROVIDER_BASE}/en/fixtures/{{date}}"
 _GOAL_RESULTS_URL = f"{_PROVIDER_BASE}/en/results/{{date}}"
 _GOAL_MATCH_URL = f"{_PROVIDER_BASE}/en-in/match/{{slug}}/{{match_id}}"
+_GOAL_MATCH_EN_URL = f"{_PROVIDER_BASE}/en/match/{{slug}}/{{match_id}}"
 _GOAL_PLAYER_URL = f"{_PROVIDER_BASE}/en/player/{{player_id}}"
 _GOAL_PLAYER_SLUG_URL = f"{_PROVIDER_BASE}/en/player/{{slug}}/{{player_id}}"
+_GOAL_PLAYER_LOCALE_URL = f"{_PROVIDER_BASE}/en-in/player/{{slug}}/{{player_id}}"
 _GOAL_TEAM_URL = f"{_PROVIDER_BASE}/en/team/{{team_id}}"
 _GOAL_TEAM_SLUG_URL = f"{_PROVIDER_BASE}/en/team/{{slug}}/{{team_id}}"
+_GOAL_TEAM_LOCALE_URL = f"{_PROVIDER_BASE}/en-in/team/{{slug}}/{{team_id}}"
 
 _SCRAPE_HEADERS = {
     "User-Agent": (
@@ -516,8 +519,15 @@ def _parse_lineups_from_match(raw_match: dict) -> GoalLineups | None:
 
 
 async def fetch_goal_match_detail(slug: str, match_id: str) -> GoalMatchDetail | None:
-    url = _GOAL_MATCH_URL.format(slug=slug, match_id=match_id)
-    html = await _fetch_html(url)
+    urls = [
+        _GOAL_MATCH_URL.format(slug=slug, match_id=match_id),
+        _GOAL_MATCH_EN_URL.format(slug=slug, match_id=match_id),
+    ]
+    html = None
+    for url in urls:
+        html = await _fetch_html(url)
+        if html:
+            break
     if not html:
         return None
     next_data = _extract_next_data(html)
@@ -630,12 +640,16 @@ def _parse_player_detail_from_next_data(next_data: dict) -> GoalPlayerDetail | N
 
 
 async def fetch_goal_player_detail(player_id: str, player_name: str | None = None) -> GoalPlayerDetail | None:
-    url = _GOAL_PLAYER_URL.format(player_id=player_id)
-    html = await _fetch_html(url)
-    if not html and player_name:
+    urls = [_GOAL_PLAYER_URL.format(player_id=player_id)]
+    if player_name:
         slug = _to_slug(player_name)
-        url = _GOAL_PLAYER_SLUG_URL.format(slug=slug, player_id=player_id)
+        urls.append(_GOAL_PLAYER_SLUG_URL.format(slug=slug, player_id=player_id))
+        urls.append(_GOAL_PLAYER_LOCALE_URL.format(slug=slug, player_id=player_id))
+    html = None
+    for url in urls:
         html = await _fetch_html(url)
+        if html:
+            break
     if not html:
         return None
     next_data = _extract_next_data(html)
@@ -687,12 +701,16 @@ def _parse_team_detail_from_next_data(next_data: dict) -> GoalTeamDetail | None:
 
 
 async def fetch_goal_team_detail(team_id: str, team_name: str | None = None) -> GoalTeamDetail | None:
-    url = _GOAL_TEAM_URL.format(team_id=team_id)
-    html = await _fetch_html(url)
-    if not html and team_name:
+    urls = [_GOAL_TEAM_URL.format(team_id=team_id)]
+    if team_name:
         slug = _to_slug(team_name)
-        url = _GOAL_TEAM_SLUG_URL.format(slug=slug, team_id=team_id)
+        urls.append(_GOAL_TEAM_SLUG_URL.format(slug=slug, team_id=team_id))
+        urls.append(_GOAL_TEAM_LOCALE_URL.format(slug=slug, team_id=team_id))
+    html = None
+    for url in urls:
         html = await _fetch_html(url)
+        if html:
+            break
     if not html:
         return None
     next_data = _extract_next_data(html)

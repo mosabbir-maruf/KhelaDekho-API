@@ -126,7 +126,7 @@ async def fetch_match_channels(slug: str) -> list[dict]:
                 "id": f"sub-{_channel_key(sub['id'])}",
                 "name": sub.get("name") or "Substream",
                 "server": (sub.get("locale") or "intl").upper(),
-                "source_url": f"{_API_BASE}/tv/resolve/{sub['id']}",
+                "source_url": f"{_API_BASE}/extract-url/{sub['id']}",
             })
 
     if not channels and raw_match.get("embedUrl"):
@@ -151,16 +151,18 @@ def public_channels(raw: list[dict]) -> list[MatchChannel]:
 
 
 async def resolve_stream(source_url: str) -> dict | None:
-    if "/tv/resolve/" in source_url:
+    if "/tv/resolve/" in source_url or "/extract-url/" in source_url:
         data = await _fetch_json(source_url)
-        if isinstance(data, dict) and data.get("success") and data.get("stream"):
-            resolved_url = data["stream"]
-            if resolved_url.startswith("/"):
-                resolved_url = _HOME + resolved_url
-            return {
-                "stream_url": resolved_url,
-                "stream_type": "hls",
-            }
+        if isinstance(data, dict) and data.get("success"):
+            # TV channel (/tv/resolve/): response has "stream"
+            if data.get("stream"):
+                resolved_url = data["stream"]
+                if resolved_url.startswith("/"):
+                    resolved_url = _HOME + resolved_url
+                return {"stream_url": resolved_url, "stream_type": "hls"}
+            # Substream (/extract-url/): response has "hlsUrl"
+            if data.get("hlsUrl"):
+                return {"stream_url": data["hlsUrl"], "stream_type": "hls"}
     return {
         "stream_url": source_url,
         "stream_type": "hls" if ".m3u8" in source_url else "dash",
