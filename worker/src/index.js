@@ -814,10 +814,18 @@ async function resolveStream(sourceUrl, homeUrl, ctx) {
     const streamUrl = extractStreamUrl(html);
     if (!streamUrl) return null;
     const result = { stream_url: streamUrl, stream_type: streamUrl.includes('.mpd') ? 'dash' : 'hls' };
-    const kidMatch = html.match(/k_id['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
-    const kvMatch = html.match(/k_v['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
-    if (kidMatch) result.drm_kid = kidMatch[1];
-    if (kvMatch) result.drm_key = kvMatch[1];
+    // Try kickbd-style DRM key variables (k_id / k_v)
+    let kidMatch = html.match(/k_id['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
+    let kvMatch = html.match(/k_v['"]?\s*[:=]\s*['"]([^'"]+)['"]/);
+    // Fallback: Shaka clearKeys format: "kid": "key"
+    if (!kidMatch || !kvMatch) {
+      const ck = html.match(/clearKeys\s*:\s*\{[^}]*"\s*([^"]+)"\s*:\s*"([^"]+)"/);
+      if (ck) { kidMatch = ck; kvMatch = ck; }
+    }
+    if (kidMatch && kvMatch && kidMatch[1] && kvMatch[2]) {
+      result.drm_kid = kidMatch[1];
+      result.drm_key = kvMatch[2];
+    }
     return result;
   } catch (e) { devError(ctx && ctx.env, 'resolveStream failed', sourceUrl, e.message); return null; }
 }
