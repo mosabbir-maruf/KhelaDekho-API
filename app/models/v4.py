@@ -45,4 +45,4 @@ class ProxybdixHealthResponse(BaseModel):
     status: str = "ok"
     version: str = "4.0.0"
     uptime_seconds: float = 0
-    source: str = "tv.proxybdix.com"
+    source: str = ""

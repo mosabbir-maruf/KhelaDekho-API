@@ -40,6 +40,7 @@ async def health_check():
         success=True,
         data=ProxybdixHealthResponse(
             uptime_seconds=time.monotonic() - _start_time,
+            source=settings.v4_home_url,
         ),
     )
 

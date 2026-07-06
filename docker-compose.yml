@@ -4,31 +4,10 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - KHELADEKHO_SECRET_KEY=${KHELADEKHO_SECRET_KEY}
-      - KHELADEKHO_V1_HOME_URL=https://livekhela.tv/
-      - KHELADEKHO_V2_HOME_URL=https://kickbd.org
-      - KHELADEKHO_REDIS_URL=redis://redis:6379/0
+      - XKEY=${XKEY}
+      - V1_HOME_URL=${V1_HOME_URL}
+      - V2_HOME_URL=${V2_HOME_URL}
+      - V4_HOME_URL=${V4_HOME_URL}
       - KHELADEKHO_DEBUG=false
       - KHELADEKHO_LOG_LEVEL=INFO
-      - KHELADEKHO_MATCH_CACHE_TTL=120
-      - KHELADEKHO_CHANNEL_CACHE_TTL=120
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 3
-    restart: unless-stopped
-    volumes:
-      - redis_data:/data
-
-volumes:
-  redis_data:

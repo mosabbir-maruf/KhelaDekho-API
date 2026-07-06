@@ -34,14 +34,17 @@ from app.services.cache import cache
 
 logger = structlog.get_logger(__name__)
 
-_GOAL_LIVE_SCORES_URL = "https://www.goal.com/en/live-scores"
-_GOAL_FIXTURES_URL = "https://www.goal.com/en/fixtures/{date}"
-_GOAL_RESULTS_URL = "https://www.goal.com/en/results/{date}"
-_GOAL_MATCH_URL = "https://www.goal.com/en-in/match/{slug}/{match_id}"
-_GOAL_PLAYER_URL = "https://www.goal.com/en/player/{player_id}"
-_GOAL_PLAYER_SLUG_URL = "https://www.goal.com/en/player/{slug}/{player_id}"
-_GOAL_TEAM_URL = "https://www.goal.com/en/team/{team_id}"
-_GOAL_TEAM_SLUG_URL = "https://www.goal.com/en/team/{slug}/{team_id}"
+# Base URL comes from env (V1_HOME_URL), never hardcoded. All paths are relative
+# to ``settings.v1_home_url``.
+_PROVIDER_BASE = settings.v1_home_url.rstrip("/")
+_GOAL_LIVE_SCORES_URL = f"{_PROVIDER_BASE}/en/live-scores"
+_GOAL_FIXTURES_URL = f"{_PROVIDER_BASE}/en/fixtures/{{date}}"
+_GOAL_RESULTS_URL = f"{_PROVIDER_BASE}/en/results/{{date}}"
+_GOAL_MATCH_URL = f"{_PROVIDER_BASE}/en-in/match/{{slug}}/{{match_id}}"
+_GOAL_PLAYER_URL = f"{_PROVIDER_BASE}/en/player/{{player_id}}"
+_GOAL_PLAYER_SLUG_URL = f"{_PROVIDER_BASE}/en/player/{{slug}}/{{player_id}}"
+_GOAL_TEAM_URL = f"{_PROVIDER_BASE}/en/team/{{team_id}}"
+_GOAL_TEAM_SLUG_URL = f"{_PROVIDER_BASE}/en/team/{{slug}}/{{team_id}}"
 
 _SCRAPE_HEADERS = {
     "User-Agent": (

@@ -26,7 +26,7 @@ from app.services.channels import (
     get_cached_highlight,
     get_cached_highlights,
 )
-from app.services.kickbd_matches import get_cached_kickbd_matches, get_cached_match_channels
+from app.services.kickbd_matches import get_cached_kickbd_matches
 
 logger = structlog.get_logger(__name__)
 
