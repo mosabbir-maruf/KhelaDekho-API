@@ -10,6 +10,45 @@ shared `xkey` header (proxy routes are exempt).
 
 ---
 
+## Project Structure
+
+```
+KhelaDekho-API/
+├── app/                      # FastAPI application
+│   ├── main.py               # App factory: CORS, gzip, xkey auth, routers, /health
+│   ├── config.py             # Settings (single source of truth, env-driven)
+│   ├── logging_config.py     # Environment-gated structlog setup
+│   ├── dependencies/
+│   │   ├── auth.py           # Shared xkey verification
+│   │   └── rate_limit.py     # Sliding-window rate limiter
+│   ├── middleware/
+│   │   └── errors.py         # Global exception handlers
+│   ├── models/               # Pydantic response models
+│   │   ├── __init__.py       # StandardResponse, HealthResponse
+│   │   ├── goal_scores.py    # V1 score-provider models
+│   │   ├── v2.py             # V2 channel models
+│   │   └── v4.py             # V4 channel models
+│   ├── routes/               # API routers
+│   │   ├── v1.py             # V1 score provider (scores, match/player/team)
+│   │   ├── v2.py             # V2 channels, highlights, live matches, proxy
+│   │   └── v4.py             # V4 channels, stream, stats, proxy
+│   └── services/             # Scraping / caching logic
+│       ├── cache.py          # In-memory TTL cache + stampede protection
+│       ├── goal_scores.py    # V1 provider scraper (base URL from env)
+│       ├── channels.py       # V2 channel/highlight extraction
+│       ├── kickbd_matches.py # V2 live matches
+│       └── proxybdix.py      # V4 channel/stream extraction
+├── worker/
+│   ├── src/index.js          # Cloudflare Worker (Hono) — same API at the edge
+│   └── wrangler.toml         # Worker config
+├── run.py                    # Local uvicorn entrypoint
+├── requirements.txt
+├── Dockerfile · docker-compose.yml
+└── wrangler.toml             # Root worker deploy config (main -> worker/src/index.js)
+```
+
+---
+
 ## API Versions
 
 ### V1 — Score Provider
