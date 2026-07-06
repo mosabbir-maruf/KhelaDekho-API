@@ -776,7 +776,7 @@ const STREAM_URL_PATTERNS = [
 function extractStreamUrl(html) {
   for (const re of STREAM_URL_PATTERNS) {
     const m = html.match(re);
-    if (m) return m[1] || m[0];
+    if (m) return (m[1] || m[0]).replace(/\\\//g, '/');
   }
   return null;
 }
