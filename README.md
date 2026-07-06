@@ -15,6 +15,7 @@ shared `xkey` header (proxy routes are exempt).
 ```
 KhelaDekho-API/
 ├── app/                          # FastAPI application
+│   ├── __init__.py
 │   ├── main.py                   # App factory: CORS, gzip, xkey auth, routers, /health
 │   ├── config.py                 # Settings (single source of truth, env-driven)
 │   ├── logging_config.py         # Environment-gated structlog setup
@@ -26,26 +27,28 @@ KhelaDekho-API/
 │   ├── models/                   # Pydantic response models
 │   │   ├── __init__.py           # StandardResponse, HealthResponse
 │   │   ├── goal_scores.py        # V1 score-provider models
-│   │   ├── v2.py                 # V2 channel models
+│   │   ├── v2.py                 # V2/V5 match + TV channel models
 │   │   └── v4.py                 # V4 channel models
-│   ├── routes/                   # API routers
-│   │   ├── v1.py                 # V1 score provider (scores, match/player/team)
-│   │   ├── v2.py                 # V2 matches, match channels, stream, proxy
-│   │   ├── v4.py                 # V4 channels, stream, stats, proxy
-│   │   └── v5.py                 # V5 matches, TV channels, stream, proxy
-│   └── services/                 # Scraping / caching logic
+│   ├── routes/                   # API routers (one per version)
+│   │   ├── __init__.py
+│   │   ├── v1.py                 # V1 score provider: scores, matches, player, team
+│   │   ├── v2.py                 # V2 match-centric streams + proxy
+│   │   ├── v4.py                 # V4 channel list, stream, stats, proxy
+│   │   └── v5.py                 # V5 matches, TV channels (DLHD), stream, proxy
+│   └── services/                 # Scraping / caching / resolution logic
 │       ├── cache.py              # In-memory TTL cache + stampede protection
-│       ├── v1.py                 # V1 provider scraper (base URL from env)
-│       ├── channels.py           # V2 match/channel scraping + stream resolution
-│       ├── v4.py                 # V4 channel/stream extraction
-│       └── v5.py                 # V5 match/channel/stream resolution + TV list
+│       ├── v1.py                 # V1 score scraper (goal.com)
+│       ├── channels.py           # V2 match/channel scraping + stream resolution + DRM
+│       ├── v4.py                 # V4 channel/stream extraction (proxybdix)
+│       └── v5.py                 # V5 match + TV channel resolution (DLHD)
 ├── worker/
 │   ├── src/
 │   │   └── index.js              # Cloudflare Worker (Hono) — same API at the edge
-│   └── wrangler.toml             # Worker config (env vars, secrets)
+│   └── wrangler.toml             # Worker env vars, secrets, KV bindings
 ├── run.py                        # Local uvicorn entrypoint
 ├── requirements.txt
 ├── Dockerfile / docker-compose.yml
+├── .env.example                  # Required environment variables
 └── wrangler.toml                 # Root deploy config → worker/src/index.js
 ```
 
