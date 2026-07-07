@@ -44,7 +44,7 @@ KhelaDekho-API/
 ├── worker/
 │   ├── src/
 │   │   └── index.js              # Cloudflare Worker (Hono) — same API at the edge
-│   └── wrangler.toml             # Worker env vars, secrets, KV bindings
+│   └── wrangler.toml             # Worker env vars, secrets
 ├── run.py                        # Local uvicorn entrypoint
 ├── requirements.txt
 ├── Dockerfile / docker-compose.yml
@@ -127,6 +127,10 @@ Single source of truth: `app/config.py`. All variables use their natural names
 | `KHELADEKHO_LOG_LEVEL` | Log level in production | `INFO` |
 
 All upstream base URLs come from env — no host is hardcoded in source.
+
+> **Cloudflare KV:** Only the frontend uses a KV namespace (`KHELA_SETTINGS`) for
+> V3 playlist storage and admin settings. The API Worker does not bind any KV
+> namespace — all caching is in-memory via `caches.default` and `cachetools.TTLCache`.
 
 The Worker also uses these **hardcoded constants** (not env vars, defined in source):
 
