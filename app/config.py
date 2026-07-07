@@ -27,6 +27,7 @@ class Settings(BaseSettings):
 
     # --- Decryption key for kickbd source URLs ---
     kickbd_decrypt_key: str = Field(default="999999859198", validation_alias="KICKBD_DECRYPT_KEY")
+    proxy_required_patterns: str = Field(default="phantemlis.top,/papi/tv/playlist/", validation_alias="PROXY_REQUIRED_PATTERNS")
 
     # --- Auth: single shared API key across the project ---
     xkey: str = Field(default="", validation_alias="XKEY")
