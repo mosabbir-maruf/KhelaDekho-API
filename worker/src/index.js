@@ -1209,6 +1209,7 @@ async function fetchV5MatchChannels(homeUrl, slug) {
   const channels = [];
   const tvChannels = rawMatch.tvChannels || [];
   const substreams = rawMatch.substreams || [];
+  const sources = rawMatch.sources || [];
 
   for (const ch of tvChannels) {
     if (ch && ch.id) {
@@ -1217,6 +1218,20 @@ async function fetchV5MatchChannels(homeUrl, slug) {
         name: ch.name || 'TV Channel',
         server: 'TV',
         source_url: `${homeUrl}/papi/tv/resolve/dlhd-${ch.id}`,
+      });
+    }
+  }
+
+  for (const src of sources) {
+    if (src && src.id) {
+      const srcId = String(src.id).toLowerCase();
+      // Avoid duplicates: skip if a substream already uses the same ID
+      if (substreams.some(s => s && s.id && String(s.id).toLowerCase() === srcId)) continue;
+      channels.push({
+        id: `src-${v5ChannelKey(src.id)}`,
+        name: src.name || src.source || 'Server',
+        server: 'Primary',
+        source_url: `${homeUrl}/papi/extract-url/${src.id}`,
       });
     }
   }
