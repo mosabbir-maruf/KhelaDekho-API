@@ -22,6 +22,7 @@ from app.services.cache import cache
 logger = structlog.get_logger(__name__)
 
 _HOME = settings.v2_home_url.rstrip("/")
+_DECRYPT_KEY = "999999859198"
 
 _SCRAPE_HEADERS = {
     "User-Agent": settings.user_agent,
@@ -90,9 +91,8 @@ def _channel_key(name: str, server: str) -> str:
 
 def _decrypt_source(payload_urlenc: str) -> str:
     decoded = urllib.parse.unquote(payload_urlenc)
-    key = settings.kickbd_decrypt_key
     return "".join(
-        chr((ord(ch) + 5) ^ int(key[i % len(key)]))
+        chr((ord(ch) + 5) ^ int(_DECRYPT_KEY[i % len(_DECRYPT_KEY)]))
         for i, ch in enumerate(decoded)
     )
 

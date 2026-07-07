@@ -720,9 +720,9 @@ export default app;
 const getV2Home = (c) => c.env.V2_HOME_URL || '';
 const getV4Home = (c) => c.env.V4_HOME_URL || '';
 
-function kickbdDecrypt(payloadUrlEnc, decryptKey) {
+function kickbdDecrypt(payloadUrlEnc) {
   const decoded = decodeURIComponent(payloadUrlEnc);
-  const k = decryptKey || '999999859198';
+  const k = '999999859198';
   let r = '';
   for (let i = 0; i < decoded.length; i++) {
     r += String.fromCharCode((decoded.charCodeAt(i) + 5) ^ parseInt(k[i % k.length]));
@@ -763,8 +763,7 @@ async function resolveStream(sourceUrl, homeUrl, ctx) {
     if (sourceUrl.includes('/source/')) {
       const pMatch = html.match(/var _p\s*=\s*"([^"]+)"/);
       if (pMatch) {
-        const decryptKey = ctx && ctx.env && ctx.env.KICKBD_DECRYPT_KEY;
-        const decrypted = kickbdDecrypt(pMatch[1], decryptKey);
+        const decrypted = kickbdDecrypt(pMatch[1]);
         const urlMatch = decrypted.match(/window\.player\.load\('([^']+)'\)/);
         if (urlMatch) {
           const result = { stream_url: urlMatch[1], stream_type: urlMatch[1].includes('.mpd') ? 'dash' : 'hls' };
