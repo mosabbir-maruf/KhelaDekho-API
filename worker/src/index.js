@@ -1164,8 +1164,8 @@ function v5ChannelKey(name) {
   return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
-async function fetchV5Matches(homeUrl) {
-  const data = await fetchJson(`${homeUrl}/papi/matches/football`);
+async function fetchV5Matches(homeUrl, sport) {
+  const data = await fetchJson(`${homeUrl}/papi/matches/${sport || 'football'}`);
   if (!Array.isArray(data)) return [];
 
   const out = [];
@@ -1199,8 +1199,8 @@ async function fetchV5Matches(homeUrl) {
   return out;
 }
 
-async function fetchV5MatchChannels(homeUrl, slug) {
-  const data = await fetchJson(`${homeUrl}/papi/matches/football`);
+async function fetchV5MatchChannels(homeUrl, slug, sport) {
+  const data = await fetchJson(`${homeUrl}/papi/matches/${sport || 'football'}`);
   if (!Array.isArray(data)) return [];
 
   const rawMatch = data.find(m => m && m.id && v5ChannelKey(m.title || String(m.id)) === slug);
@@ -1291,7 +1291,9 @@ async function resolveV5Stream(sourceUrl, homeUrl) {
 
 app.get('/api/v5/matches', async (c) => {
   const homeUrl = getV5Home(c);
-  const matches = await getCachedOrFetch(c, 'v5_matches', () => fetchV5Matches(homeUrl), 60);
+  const sport = c.req.query('sport') || 'football';
+  const cacheKey = `v5_matches_${sport}`;
+  const matches = await getCachedOrFetch(c, cacheKey, () => fetchV5Matches(homeUrl, sport), 60);
   const list = c.req.query('live') === 'true' ? matches.filter(m => m.is_live) : matches;
   return c.json(makeResponse(true, { matches: list, total: list.length, cached_at: new Date().toISOString() }));
 });
@@ -1299,7 +1301,8 @@ app.get('/api/v5/matches', async (c) => {
 app.get('/api/v5/matches/:slug/channels', async (c) => {
   const homeUrl = getV5Home(c);
   const slug = c.req.param('slug');
-  const channels = await getCachedOrFetch(c, `v5_mc_${slug}`, () => fetchV5MatchChannels(homeUrl, slug), 120);
+  const sport = c.req.query('sport') || 'football';
+  const channels = await getCachedOrFetch(c, `v5_mc_${sport}_${slug}`, () => fetchV5MatchChannels(homeUrl, slug, sport), 120);
   const safe = channels.map(({ id, name, server }) => ({ id, name, server }));
   return c.json(makeResponse(true, { slug, channels: safe, total: safe.length, cached_at: new Date().toISOString() }));
 });
@@ -1308,9 +1311,10 @@ app.get('/api/v5/matches/:slug/stream', async (c) => {
   const homeUrl = getV5Home(c);
   const slug = c.req.param('slug');
   const chId = c.req.query('ch');
+  const sport = c.req.query('sport') || 'football';
   if (!chId) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'ch parameter required' }), 400);
 
-  const channels = await getCachedOrFetch(c, `v5_mc_${slug}`, () => fetchV5MatchChannels(homeUrl, slug), 120);
+  const channels = await getCachedOrFetch(c, `v5_mc_${sport}_${slug}`, () => fetchV5MatchChannels(homeUrl, slug, sport), 120);
   const channel = channels.find(ch => ch.id === chId);
   if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
 
