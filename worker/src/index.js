@@ -1222,11 +1222,9 @@ async function fetchV5MatchChannels(homeUrl, slug) {
     }
   }
 
+  const seenSubIds = new Set(substreams.filter(s => s && s.id).map(s => String(s.id).toLowerCase()));
   for (const src of sources) {
-    if (src && src.id) {
-      const srcId = String(src.id).toLowerCase();
-      // Avoid duplicates: skip if a substream already uses the same ID
-      if (substreams.some(s => s && s.id && String(s.id).toLowerCase() === srcId)) continue;
+    if (src && src.id && !seenSubIds.has(String(src.id).toLowerCase())) {
       channels.push({
         id: `src-${v5ChannelKey(src.id)}`,
         name: src.name || src.source || 'Server',

@@ -110,6 +110,7 @@ async def fetch_match_channels(slug: str) -> list[dict]:
     channels = []
     tv_channels = raw_match.get("tvChannels") or []
     substreams = raw_match.get("substreams") or []
+    sources = raw_match.get("sources") or []
 
     for ch in tv_channels:
         if isinstance(ch, dict) and ch.get("id"):
@@ -118,6 +119,16 @@ async def fetch_match_channels(slug: str) -> list[dict]:
                 "name": ch.get("name") or "TV Channel",
                 "server": "TV",
                 "source_url": f"{_API_BASE}/tv/resolve/dlhd-{ch['id']}",
+            })
+
+    seen_ids = {str(s.get("id", "")).lower() for s in substreams if isinstance(s, dict)}
+    for src in sources:
+        if isinstance(src, dict) and src.get("id") and str(src["id"]).lower() not in seen_ids:
+            channels.append({
+                "id": f"src-{_channel_key(src['id'])}",
+                "name": src.get("name") or src.get("source") or "Server",
+                "server": "Primary",
+                "source_url": f"{_API_BASE}/extract-url/{src['id']}",
             })
 
     for sub in substreams:
