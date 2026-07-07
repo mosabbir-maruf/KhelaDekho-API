@@ -17,12 +17,12 @@ from app.models.v2 import (
     TVChannelListResponse,
     TVStreamResponse,
 )
+from app.services.channels import public_channels
 from app.services.v5 import (
     get_cached_match_channels,
     get_cached_matches,
     get_cached_stream,
     get_cached_tv_channels,
-    public_channels,
     resolve_tv_channel_stream,
 )
 
@@ -30,10 +30,7 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v5")
 
-if not settings.v5_home_url:
-    raise ValueError("KHELADEKHO_V5_HOME_URL setting is required")
-
-_HOME = settings.v5_home_url.rstrip("/")
+_HOME = settings.v5_home_url.rstrip("/") if settings.v5_home_url else ""
 _PROXY_BASE = "/api/v5/proxy?url="
 
 # Opaque token -> upstream URL mapping, so upstream provider URLs and auth

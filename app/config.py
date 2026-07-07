@@ -25,10 +25,13 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     allow_origins: list[str] = ["*"]
 
+    # --- Decryption key for kickbd source URLs ---
+    kickbd_decrypt_key: str = Field(default="999999859198", validation_alias="KICKBD_DECRYPT_KEY")
+
     # --- Auth: single shared API key across the project ---
     xkey: str = Field(default="", validation_alias="XKEY")
 
-    model_config = {"env_prefix": "KHELADEKHO_", "extra": "ignore"}
+    model_config = {"extra": "ignore"}
 
 
 settings = Settings()

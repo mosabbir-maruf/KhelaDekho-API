@@ -15,6 +15,8 @@ V5_HOME_URL = "https://dami-tv.pro"
 PROXY_REQUIRED_PATTERNS = "phantemlis.top,/papi/tv/playlist/"
 # Internal domain for Cache API key partitioning (not a real network request)
 CACHE_INTERNAL_DOMAIN = "kheladekho-cache.internal"
+# Kickbd stream decryption key (must match upstream's encryption key)
+KICKBD_DECRYPT_KEY = "999999859198"
 # Set ENVIRONMENT = "development" for verbose local logs (production stays silent)
 # XKEY is set as a secret via Cloudflare Dashboard or `wrangler secret put XKEY`
 

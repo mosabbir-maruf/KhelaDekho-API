@@ -157,10 +157,6 @@ async def get_cached_match_channels(slug: str) -> list[dict]:
     )
 
 
-def public_channels(raw: list[dict]) -> list[MatchChannel]:
-    return [MatchChannel(id=c["id"], name=c["name"], server=c["server"]) for c in raw]
-
-
 async def resolve_stream(source_url: str) -> dict | None:
     if "/tv/resolve/" in source_url or "/extract-url/" in source_url:
         data = await _fetch_json(source_url)

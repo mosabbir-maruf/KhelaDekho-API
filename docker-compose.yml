@@ -8,6 +8,7 @@ services:
       - V1_HOME_URL=${V1_HOME_URL}
       - V2_HOME_URL=${V2_HOME_URL}
       - V4_HOME_URL=${V4_HOME_URL}
-      - KHELADEKHO_DEBUG=false
-      - KHELADEKHO_LOG_LEVEL=INFO
+      - V5_HOME_URL=${V5_HOME_URL}
+      - KHELADEKHO_DEBUG=${KHELADEKHO_DEBUG:-false}
+      - KHELADEKHO_LOG_LEVEL=${KHELADEKHO_LOG_LEVEL:-INFO}
     restart: unless-stopped
