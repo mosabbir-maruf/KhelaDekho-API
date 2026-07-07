@@ -1,5 +1,9 @@
 # KhelaDekho API
 
+<p align="center">
+  <img src="https://kheladekho.pages.dev/meta-graph.webp" alt="KhelaDekho" width="600" />
+</p>
+
 Aggregator API for KhelaDekho. The same routes are available in two runtimes:
 
 - **FastAPI app** (`app/`) — run locally or in Docker (uvicorn).
