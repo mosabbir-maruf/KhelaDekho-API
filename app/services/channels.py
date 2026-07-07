@@ -127,7 +127,6 @@ async def fetch_matches() -> list[KickbdMatch]:
     
     # 1. Try to extract matches from data fixture objects (home-fixture-grid) in the Next.js RSC payload
     # which contains all matches shown in the grid.
-    import re
     raw = []
     # Find all "data":{"id":X,...} objects
     for m in re.finditer(r'"data":(\{"id":\d+,"match_name":.+?"match_category_id":\d+\})', unescaped):

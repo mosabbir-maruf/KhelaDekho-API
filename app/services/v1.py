@@ -552,11 +552,10 @@ _CACHE_TTL_PLAYER = 300
 
 
 def _to_slug(name: str) -> str:
-    import re as _re
     s = name.lower().strip()
-    s = _re.sub(r"[^a-z0-9\s-]", "", s)
-    s = _re.sub(r"\s+", "-", s)
-    s = _re.sub(r"-+", "-", s)
+    s = re.sub(r"[^a-z0-9\s-]", "", s)
+    s = re.sub(r"\s+", "-", s)
+    s = re.sub(r"-+", "-", s)
     return s.strip("-")
 
 

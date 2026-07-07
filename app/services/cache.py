@@ -47,13 +47,6 @@ class CacheService:
             await self.set(prefix, identifier, value, ttl)
             return value
 
-    async def invalidate(self, prefix: str, identifier: str | None = None):
-        if identifier:
-            key = self._cache_key(prefix, identifier)
-            self._local_cache.pop(key, None)
-        else:
-            self._local_cache.clear()
-
 
 cache = CacheService()
 

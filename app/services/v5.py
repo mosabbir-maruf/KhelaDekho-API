@@ -189,21 +189,19 @@ async def get_cached_stream(slug: str, ch_id: str, source_url: str) -> dict | No
 
 # --- V5 TV Channels (DLHD 24/7) ---
 
-import re as _re
-
 def detect_channel_category(name: str) -> str:
     n = f" {name.lower()} "
-    if _re.search(r"sport|espn|sky\s?sport|fox\s?sport|bein|dazn|nba|nfl|nhl|mlb|"
-                  r"tnt\s?sport|premier|football|cricket|tennis|golf|wwe|ufc|racing|"
-                  r"motogp|formula|\bf1\b|supersport|willow|optus", n):
+    if re.search(r"sport|espn|sky\s?sport|fox\s?sport|bein|dazn|nba|nfl|nhl|mlb|"
+                 r"tnt\s?sport|premier|football|cricket|tennis|golf|wwe|ufc|racing|"
+                 r"motogp|formula|\bf1\b|supersport|willow|optus", n):
         return "Sports"
-    if _re.search(r"news|cnn|bbc\s?news|fox\s?news|sky\s?news|al\s?jazeera|msnbc|cnbc|gb\s?news", n):
+    if re.search(r"news|cnn|bbc\s?news|fox\s?news|sky\s?news|al\s?jazeera|msnbc|cnbc|gb\s?news", n):
         return "News"
-    if _re.search(r"kids|cartoon|disney|nick|baby|boomerang|pbs\s?kids", n):
+    if re.search(r"kids|cartoon|disney|nick|baby|boomerang|pbs\s?kids", n):
         return "Kids"
-    if _re.search(r"movie|cinema|hbo|\bamc\b|film|starz|showtime|cinemax|paramount", n):
+    if re.search(r"movie|cinema|hbo|\bamc\b|film|starz|showtime|cinemax|paramount", n):
         return "Entertainment"
-    if _re.search(r"music|mtv|vh1|radio|hits|rhythm|beat|concert|band|billboard", n):
+    if re.search(r"music|mtv|vh1|radio|hits|rhythm|beat|concert|band|billboard", n):
         return "Music"
     return "General"
 
