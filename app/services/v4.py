@@ -24,7 +24,7 @@ _API_HEADERS = {
 async def fetch_all_channels() -> list[ProxybdixChannel]:
     config_url = f"{_API_BASE}/api.php?action=config&id="
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with httpx.AsyncClient(timeout=15.0) as client:
         try:
             resp = await client.get(config_url, headers=_API_HEADERS)
             resp.raise_for_status()
@@ -47,13 +47,13 @@ async def fetch_all_channels() -> list[ProxybdixChannel]:
     # Resolve all stream URLs concurrently
     sem = asyncio.Semaphore(15)
 
-    async def resolve_one(ch: dict) -> ProxybdixChannel | None:
+    async def resolve_one(ch: dict, c: httpx.AsyncClient) -> ProxybdixChannel | None:
         if not ch.get("id"):
             return None
         url = f"{_API_BASE}/api.php?action=stream&id={ch['id']}"
         async with sem:
             try:
-                r = await client.get(url, headers=_API_HEADERS)
+                r = await c.get(url, headers=_API_HEADERS)
                 r.raise_for_status()
                 res = r.json()
                 if isinstance(res, dict) and res.get("url"):
@@ -70,8 +70,8 @@ async def fetch_all_channels() -> list[ProxybdixChannel]:
                 logger.debug("v4_resolve_failed", channel_id=ch["id"], error=str(e))
         return None
 
-    async with httpx.AsyncClient(timeout=8.0) as client:
-        tasks = [resolve_one(ch) for ch in raw_channels]
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        tasks = [resolve_one(ch, client) for ch in raw_channels]
         results = await asyncio.gather(*tasks)
 
     return [r for r in results if r is not None]

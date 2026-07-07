@@ -39,7 +39,9 @@ def _filter_data(
 
     if status_filter:
         status_map = {"live": "LIVE", "result": "RESULT", "fixture": "FIXTURE"}
-        mapped = status_map[status_filter]
+        mapped = status_map.get(status_filter)
+        if not mapped:
+            return data
         for comp in data.competitions:
             comp.matches = [m for m in comp.matches if m.status == mapped]
         data.total_matches = sum(len(c.matches) for c in data.competitions)
