@@ -48,7 +48,8 @@ KhelaDekho-API/
 ├── run.py                        # Local uvicorn entrypoint
 ├── requirements.txt
 ├── Dockerfile / docker-compose.yml
-└── .env.example                  # Required environment variables
+├── .env.example                  # Required environment variables
+└── wrangler.toml                 # Root deploy config (for CI/CD) → worker/src/index.js
 ```
 
 ---
