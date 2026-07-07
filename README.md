@@ -103,9 +103,9 @@ categorization (Sports, News, Kids, Entertainment, Music, General).
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/v5/matches` | Match list (football) |
-| `GET /api/v5/matches/{slug}/channels` | Channels + substreams for a match |
-| `GET /api/v5/matches/{slug}/stream?ch={id}` | Resolve one channel/substream |
+| `GET /api/v5/matches?sport=` | Match list (`?sport=football` or `?sport=cricket`; defaults to football) |
+| `GET /api/v5/matches/{slug}/channels?sport=` | Channels + substreams for a match |
+| `GET /api/v5/matches/{slug}/stream?ch={id}&sport=` | Resolve one channel/substream |
 | `GET /api/v5/tv/channels` | DLHD 24/7 TV channel list (878+ channels) |
 | `GET /api/v5/tv/channel/{id}/stream` | Resolve a DLHD channel stream |
 | `GET /api/v5/proxy?t=` | Token-based proxy (upstream URL hidden behind opaque token) |
