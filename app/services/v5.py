@@ -47,8 +47,8 @@ def _channel_key(name: str) -> str:
     return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", raw))
 
 
-async def fetch_matches() -> list[KickbdMatch]:
-    data = await _fetch_json(f"{_API_BASE}/matches/football")
+async def fetch_matches(sport: str = "football") -> list[KickbdMatch]:
+    data = await _fetch_json(f"{_API_BASE}/matches/{sport}")
     if not isinstance(data, list):
         return []
 
@@ -72,7 +72,7 @@ async def fetch_matches() -> list[KickbdMatch]:
             id=slug,
             slug=slug,
             name=(m.get("title") or "").strip(),
-            sport=(m.get("category") or "football").strip(),
+            sport=(m.get("category") or sport).strip(),
             status=m.get("status") or "",
             is_live=is_live,
             start_date=m.get("date") if m.get("date") else None,
@@ -84,17 +84,17 @@ async def fetch_matches() -> list[KickbdMatch]:
     return out
 
 
-async def get_cached_matches() -> list[KickbdMatch]:
-    return await cache.get_or_set(prefix="v5_service", identifier="matches", factory=fetch_matches, ttl=60)
+async def get_cached_matches(sport: str = "football") -> list[KickbdMatch]:
+    return await cache.get_or_set(prefix=f"v5_matches_{sport}", identifier=sport, factory=lambda: fetch_matches(sport), ttl=60)
 
 
-async def fetch_match_channels(slug: str) -> list[dict]:
-    matches = await get_cached_matches()
+async def fetch_match_channels(slug: str, sport: str = "football") -> list[dict]:
+    matches = await get_cached_matches(sport)
     match_item = next((m for m in matches if m.slug == slug), None)
     if not match_item:
         return []
 
-    data = await _fetch_json(f"{_API_BASE}/matches/football")
+    data = await _fetch_json(f"{_API_BASE}/matches/{sport}")
     if not isinstance(data, list):
         return []
 
@@ -151,9 +151,9 @@ async def fetch_match_channels(slug: str) -> list[dict]:
     return channels
 
 
-async def get_cached_match_channels(slug: str) -> list[dict]:
+async def get_cached_match_channels(slug: str, sport: str = "football") -> list[dict]:
     return await cache.get_or_set(
-        prefix="v5_mc", identifier=slug, factory=lambda: fetch_match_channels(slug), ttl=120
+        prefix="v5_mc", identifier=f"{sport}_{slug}", factory=lambda: fetch_match_channels(slug, sport), ttl=120
     )
 
 

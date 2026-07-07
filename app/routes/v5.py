@@ -73,8 +73,8 @@ def _resolve_token(token: str | None) -> str | None:
     "/matches",
     response_model=StandardResponse[KickbdMatchListResponse]
 )
-async def list_matches(live: bool = Query(False)):
-    matches = await get_cached_matches()
+async def list_matches(live: bool = Query(False), sport: str = Query("football")):
+    matches = await get_cached_matches(sport)
     if live:
         matches = [m for m in matches if m.is_live]
     return StandardResponse(
@@ -87,8 +87,8 @@ async def list_matches(live: bool = Query(False)):
     "/matches/{slug}/channels",
     response_model=StandardResponse[MatchChannelListResponse]
 )
-async def list_match_channels(slug: str):
-    raw = await get_cached_match_channels(slug)
+async def list_match_channels(slug: str, sport: str = Query("football")):
+    raw = await get_cached_match_channels(slug, sport)
     channels = public_channels(raw)
     return StandardResponse(
         success=True,
@@ -100,8 +100,8 @@ async def list_match_channels(slug: str):
     "/matches/{slug}/stream",
     response_model=StandardResponse[StreamResponse]
 )
-async def get_match_stream(slug: str, ch: str = Query(..., min_length=1)):
-    raw = await get_cached_match_channels(slug)
+async def get_match_stream(slug: str, ch: str = Query(..., min_length=1), sport: str = Query("football")):
+    raw = await get_cached_match_channels(slug, sport)
     channel = next((c for c in raw if c["id"] == ch), None)
     if not channel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
