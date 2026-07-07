@@ -21,7 +21,7 @@ KhelaDekho-API/
 │   ├── logging_config.py         # Environment-gated structlog setup
 │   ├── dependencies/
 │   │   ├── auth.py               # Shared xkey verification
-│   │   └── rate_limit.py         # (removed - contact form only)
+
 │   ├── middleware/
 │   │   └── errors.py             # Global exception handlers
 │   ├── models/                   # Pydantic response models
@@ -104,7 +104,7 @@ categorization (Sports, News, Kids, Entertainment, Music, General).
 | `GET /api/v5/matches/{slug}/stream?ch={id}` | Resolve one channel/substream |
 | `GET /api/v5/tv/channels` | DLHD 24/7 TV channel list (878+ channels) |
 | `GET /api/v5/tv/channel/{id}/stream` | Resolve a DLHD channel stream |
-| `GET /api/v5/proxy?url=` | CORS/Referer proxy for TV manifests |
+| `GET /api/v5/proxy?t=` | Token-based proxy (upstream URL hidden behind opaque token) |
 
 All v5 streams are routed through the proxy to keep Referer/Origin headers fresh
 and rewrite tokenized manifests. TV channel streams have no rate limit.
@@ -113,8 +113,8 @@ and rewrite tokenized manifests. TV channel streams have no rate limit.
 
 ## Configuration
 
-Single source of truth: `app/config.py` (env prefix `KHELADEKHO_`). Provider and
-auth keys use unprefixed aliases so they match the Worker and frontend.
+Single source of truth: `app/config.py`. All variables use their natural names
+(`V1_HOME_URL`, `XKEY`, etc.) — no prefix — so they match the Worker and frontend.
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
@@ -123,8 +123,6 @@ auth keys use unprefixed aliases so they match the Worker and frontend.
 | `V2_HOME_URL` | V2 channel-provider base URL | — |
 | `V4_HOME_URL` | V4 channel-provider base URL | — |
 | `V5_HOME_URL` | V5 match-provider base URL | — |
-| `PROXY_REQUIRED_PATTERNS` | Comma-sep domains/URLs that need proxying | `phantemlis.top,/papi/tv/playlist/` |
-| `CACHE_INTERNAL_DOMAIN` | Internal domain for cache key partitioning | `kheladekho-cache.internal` |
 | `KHELADEKHO_DEBUG` | Verbose console logging | `false` |
 | `KHELADEKHO_LOG_LEVEL` | Log level in production | `INFO` |
 
