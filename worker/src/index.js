@@ -710,7 +710,15 @@ app.get('/', (c) => c.json(makeResponse(true, {
 })));
 app.get('/health', (c) => c.redirect('/api/v1/health', 301));
 
-export default app;
+// Warm-up CRON trigger: calls the health endpoint internally every minute
+// to prevent cold starts. The xkey is optional for internal calls but we pass
+// it anyway to exercise the full auth + route path.
+async function scheduledHandler(event, env, ctx) {
+  const req = new Request('http://internal/api/v1/health', { headers: { 'xkey': env.XKEY || '' } });
+  await app.fetch(req, env, ctx);
+}
+
+export default { fetch: app.fetch, scheduled: scheduledHandler };
 
 // =========================================================================
 // V2 — Kickbd
