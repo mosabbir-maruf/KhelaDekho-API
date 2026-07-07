@@ -48,8 +48,7 @@ KhelaDekho-API/
 ├── run.py                        # Local uvicorn entrypoint
 ├── requirements.txt
 ├── Dockerfile / docker-compose.yml
-├── .env.example                  # Required environment variables
-└── wrangler.toml                 # Root deploy config → worker/src/index.js
+└── .env.example                  # Required environment variables
 ```
 
 ---
@@ -157,7 +156,7 @@ routes as the FastAPI app.
 **Run locally** (Wrangler dev server on `http://localhost:8787`):
 
 ```bash
-cd worker            # or run from the repo root (uses ./wrangler.toml)
+cd worker
 npm install
 npm run dev          # local dev at http://localhost:8787
 ```
