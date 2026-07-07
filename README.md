@@ -128,6 +128,14 @@ Single source of truth: `app/config.py`. All variables use their natural names
 
 All upstream base URLs come from env — no host is hardcoded in source.
 
+The Worker also uses these **hardcoded constants** (not env vars, defined in source):
+
+| Constant | Location | Value |
+|----------|----------|-------|
+| `PROXY_REQUIRED_PATTERNS` | `worker:122` (`needsProxy`) | `phantemlis.top,/papi/tv/playlist/` |
+| `CACHE_INTERNAL_DOMAIN` | `worker:120` (`cacheDomain`) | `kheladekho-cache.internal` |
+| `_DECRYPT_KEY` | `channels.py:25` | `999999859198` |
+
 Logging is environment-gated: human-readable console logs when `DEBUG=true`,
 compact JSON at `LOG_LEVEL` otherwise. The Worker logs only when
 `ENVIRONMENT=development`; production is silent.
