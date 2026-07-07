@@ -1,7 +1,7 @@
 # KhelaDekho API
 
 <p align="center">
-  <img src="https://kheladekho.pages.dev/meta-graph.webp" alt="KhelaDekho" width="600" />
+  <img src="https://kheladekho.pages.dev/meta-graph.webp" alt="KhelaDekho" width="100%" />
 </p>
 
 Aggregator API for KhelaDekho. The same routes are available in two runtimes:
