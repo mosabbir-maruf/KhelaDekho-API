@@ -48,15 +48,18 @@ def _channel_key(name: str) -> str:
 
 
 async def fetch_matches(sport: str = "football") -> list[KickbdMatch]:
-    data = await _fetch_json(f"{_API_BASE}/matches/{sport}")
+    data = await _fetch_json(f"{_API_BASE}/matches/{urllib.parse.quote(sport, safe='')}")
     if not isinstance(data, list):
         return []
 
     out: list[KickbdMatch] = []
     seen_slugs = set()
+    blocked_titles = {"24/7 South Park", "24/7 COWS"}
 
     for m in data:
         if not isinstance(m, dict) or not m.get("id"):
+            continue
+        if m.get("title") in blocked_titles:
             continue
         slug = _channel_key(m.get("title") or str(m["id"]))
         if slug in seen_slugs:
@@ -68,16 +71,26 @@ async def fetch_matches(sport: str = "football") -> list[KickbdMatch]:
         t1 = t.get("home") or {}
         t2 = t.get("away") or {}
 
+        name = (m.get("title") or "").strip()
+        local_posters = {
+            "Rally TV": "/V5-24:7-Assets/rallytv.webp",
+            "24/7 The Simpsons": "/V5-24:7-Assets/simpsons.webp",
+            "24/7 SpongeBob Squarepants": "/V5-24:7-Assets/SpongeBob.webp",
+            "24/7 Family Guy": "/V5-24:7-Assets/FamilyGuy.webp",
+        }
+        poster_path = local_posters.get(name) if sport == "24/7-streams" else None
+        poster = f"{_HOME}{poster_path}" if poster_path else (m.get("poster") or m.get("ppvPoster"))
+
         out.append(KickbdMatch(
             id=slug,
             slug=slug,
-            name=(m.get("title") or "").strip(),
+            name=name,
             sport=(m.get("category") or sport).strip(),
             status=m.get("status") or "",
             is_live=is_live,
             start_date=m.get("date") if m.get("date") else None,
             end_date=None,
-            poster=m.get("poster") or m.get("ppvPoster"),
+            poster=poster,
             team_a=TeamInfo(name=(t1.get("name") or "").strip(), logo=t1.get("badge")) if t1.get("name") else None,
             team_b=TeamInfo(name=(t2.get("name") or "").strip(), logo=t2.get("badge")) if t2.get("name") else None,
         ))
@@ -94,7 +107,7 @@ async def fetch_match_channels(slug: str, sport: str = "football") -> list[dict]
     if not match_item:
         return []
 
-    data = await _fetch_json(f"{_API_BASE}/matches/{sport}")
+    data = await _fetch_json(f"{_API_BASE}/matches/{urllib.parse.quote(sport, safe='')}")
     if not isinstance(data, list):
         return []
 

@@ -1173,14 +1173,16 @@ function v5ChannelKey(name) {
 }
 
 async function fetchV5Matches(homeUrl, sport) {
-  const data = await fetchJson(`${homeUrl}/papi/matches/${sport || 'football'}`);
+  const data = await fetchJson(`${homeUrl}/papi/matches/${encodeURIComponent(sport || 'football')}`);
   if (!Array.isArray(data)) return [];
 
   const out = [];
   const seen = new Set();
 
+  const blockedTitles = new Set(["24/7 South Park", "24/7 COWS"]);
   for (const m of data) {
     if (!m || !m.id) continue;
+    if (blockedTitles.has(m.title)) continue;
     const slug = v5ChannelKey(m.title || String(m.id));
     if (seen.has(slug)) continue;
     seen.add(slug);
@@ -1189,16 +1191,20 @@ async function fetchV5Matches(homeUrl, sport) {
     const t1 = teams.home || {};
     const t2 = teams.away || {};
 
+    const name = (m.title || '').trim();
+    const posterPath = sport === '24/7-streams' && ({'Rally TV':'/V5-24:7-Assets/rallytv.webp','24/7 The Simpsons':'/V5-24:7-Assets/simpsons.webp','24/7 SpongeBob Squarepants':'/V5-24:7-Assets/SpongeBob.webp','24/7 Family Guy':'/V5-24:7-Assets/FamilyGuy.webp'})[name];
+    const poster247 = posterPath ? `${homeUrl}${posterPath}` : null;
+
     out.push({
       id: slug,
       slug,
-      name: (m.title || '').trim(),
+      name,
       sport: (m.category || 'football').trim(),
       status: m.status || '',
       is_live: m.status === 'live',
       start_date: m.date || null,
       end_date: null,
-      poster: m.poster || m.ppvPoster || null,
+      poster: poster247 || m.poster || m.ppvPoster || null,
       team_a: t1.name ? { name: t1.name.trim(), logo: t1.badge || null } : null,
       team_b: t2.name ? { name: t2.name.trim(), logo: t2.badge || null } : null,
       cached_at: new Date().toISOString(),
@@ -1208,7 +1214,7 @@ async function fetchV5Matches(homeUrl, sport) {
 }
 
 async function fetchV5MatchChannels(homeUrl, slug, sport) {
-  const data = await fetchJson(`${homeUrl}/papi/matches/${sport || 'football'}`);
+  const data = await fetchJson(`${homeUrl}/papi/matches/${encodeURIComponent(sport || 'football')}`);
   if (!Array.isArray(data)) return [];
 
   const rawMatch = data.find(m => m && m.id && v5ChannelKey(m.title || String(m.id)) === slug);
