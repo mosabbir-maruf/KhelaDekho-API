@@ -8,7 +8,7 @@ enabled = true
 [triggers]
 crons = ["*/1 * * * *"]  # warm-up every minute to prevent cold starts
 
-assets = { directory = "public" }
+assets = { directory = "public", binding = "ASSETS" }
 
 [vars]
 # Upstream base URLs (V1 = score provider, V2 = kickbd, V4 = proxybdix)

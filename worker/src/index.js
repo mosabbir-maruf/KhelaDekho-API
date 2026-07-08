@@ -23,11 +23,22 @@ app.use('*', cors({
   allowHeaders: ['xkey', 'Content-Type', 'User-Agent']
 }));
 
+// Serve 24/7 poster images from the Worker's asset directory
+app.get('/V5-24:7-Assets/:file', async (c) => {
+  try {
+    if (typeof c.env.ASSETS?.fetch === 'function') {
+      const res = await c.env.ASSETS.fetch(c.req.raw);
+      if (res.status !== 404) return res;
+    }
+  } catch { /* fall through */ }
+  return new Response('Not Found', { status: 404 });
+});
+
 // Single shared API-key auth (xkey) — proxy routes are exempt because media
 // players cannot attach custom headers.
 app.use('*', async (c, next) => {
   const path = new URL(c.req.url).pathname;
-  if (path.endsWith('/proxy')) return await next();
+  if (path.endsWith('/proxy') || path.startsWith('/V5-24:7-Assets/')) return await next();
 
   const expected = c.env.XKEY;
   if (expected) {
