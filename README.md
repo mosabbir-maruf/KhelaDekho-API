@@ -48,6 +48,8 @@ KhelaDekho-API/
 ├── worker/
 │   ├── src/
 │   │   └── index.js              # Cloudflare Worker (Hono) — same API at the edge
+│   ├── public/
+│   │   └── V5-24:7-Assets/       # 24/7 stream poster images (FamilyGuy.webp, rallytv.webp, simpsons.webp, SpongeBob.webp)
 │   └── wrangler.toml             # Worker env vars, secrets
 ├── run.py                        # Local uvicorn entrypoint
 ├── requirements.txt
@@ -98,12 +100,22 @@ stream is resolved lazily on demand.
 Match-first API: list live/upcoming matches, then browse channels per match and
 resolve streams on demand. Supports both TV channels and substreams.
 
+The `?sport=` parameter accepts **12 sport slugs**: `football`, `cricket`,
+`motorsports`, `basketball`, `fight`, `rugby`, `tennis`, `golf`,
+`american-football`, `afl`, `volleyball`, and `24/7-streams` (24/7 animated
+series & entertainment channels). The slug is URL-encoded before being sent
+to the upstream provider.
+
+The `24/7-streams` sport returns 4 channels (Family Guy, The Simpsons,
+SpongeBob, Rally TV) after filtering out South Park and COWS. Each channel
+uses a custom poster image served from the Worker's `/public` directory.
+
 Also provides a standalone DLHD 24/7 TV channel list (878+ channels) with auto-
 categorization (Sports, News, Kids, Entertainment, Music, General).
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/v5/matches?sport=` | Match list (`?sport=football` or `?sport=cricket`; defaults to football) |
+| `GET /api/v5/matches?sport=` | Match list (`?sport=football`, `?sport=cricket`, `?sport=24/7-streams`, etc.; defaults to football) |
 | `GET /api/v5/matches/{slug}/channels?sport=` | Channels + substreams for a match |
 | `GET /api/v5/matches/{slug}/stream?ch={id}&sport=` | Resolve one channel/substream |
 | `GET /api/v5/tv/channels` | DLHD 24/7 TV channel list (878+ channels) |
@@ -112,6 +124,9 @@ categorization (Sports, News, Kids, Entertainment, Music, General).
 
 All v5 streams are routed through the proxy to keep Referer/Origin headers fresh
 and rewrite tokenized manifests. TV channel streams have no rate limit.
+
+The Worker serves static poster assets from `worker/public/V5-24:7-Assets/`,
+available at `{V5_HOME_URL}/V5-24:7-Assets/{name}.webp`.
 
 ---
 

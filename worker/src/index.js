@@ -1172,6 +1172,14 @@ function v5ChannelKey(name) {
   return String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
 }
 
+const V5_BLOCKED_TITLES = new Set(["24/7 South Park", "24/7 COWS"]);
+const V5_POSTER_247_MAP = {
+  'Rally TV': '/V5-24:7-Assets/rallytv.webp',
+  '24/7 The Simpsons': '/V5-24:7-Assets/simpsons.webp',
+  '24/7 SpongeBob Squarepants': '/V5-24:7-Assets/SpongeBob.webp',
+  '24/7 Family Guy': '/V5-24:7-Assets/FamilyGuy.webp',
+};
+
 async function fetchV5Matches(homeUrl, sport) {
   const data = await fetchJson(`${homeUrl}/papi/matches/${encodeURIComponent(sport || 'football')}`);
   if (!Array.isArray(data)) return [];
@@ -1179,10 +1187,9 @@ async function fetchV5Matches(homeUrl, sport) {
   const out = [];
   const seen = new Set();
 
-  const blockedTitles = new Set(["24/7 South Park", "24/7 COWS"]);
   for (const m of data) {
     if (!m || !m.id) continue;
-    if (blockedTitles.has(m.title)) continue;
+    if (V5_BLOCKED_TITLES.has(m.title)) continue;
     const slug = v5ChannelKey(m.title || String(m.id));
     if (seen.has(slug)) continue;
     seen.add(slug);
@@ -1192,7 +1199,7 @@ async function fetchV5Matches(homeUrl, sport) {
     const t2 = teams.away || {};
 
     const name = (m.title || '').trim();
-    const posterPath = sport === '24/7-streams' && ({'Rally TV':'/V5-24:7-Assets/rallytv.webp','24/7 The Simpsons':'/V5-24:7-Assets/simpsons.webp','24/7 SpongeBob Squarepants':'/V5-24:7-Assets/SpongeBob.webp','24/7 Family Guy':'/V5-24:7-Assets/FamilyGuy.webp'})[name];
+    const posterPath = sport === '24/7-streams' && V5_POSTER_247_MAP[name];
     const poster247 = posterPath ? `${homeUrl}${posterPath}` : null;
 
     out.push({

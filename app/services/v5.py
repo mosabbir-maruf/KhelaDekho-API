@@ -30,13 +30,22 @@ _SCRAPE_HEADERS = {
     "Origin": _HOME,
 }
 
+_HTTP_CLIENT = httpx.AsyncClient(timeout=15.0, headers=_SCRAPE_HEADERS, follow_redirects=True)
+
+_24_7_POSTERS = {
+    "Rally TV": "/V5-24:7-Assets/rallytv.webp",
+    "24/7 The Simpsons": "/V5-24:7-Assets/simpsons.webp",
+    "24/7 SpongeBob Squarepants": "/V5-24:7-Assets/SpongeBob.webp",
+    "24/7 Family Guy": "/V5-24:7-Assets/FamilyGuy.webp",
+}
+_BLOCKED_24_7_TITLES = {"24/7 South Park", "24/7 COWS"}
+
 
 async def _fetch_json(url: str) -> dict | list | None:
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, headers=_SCRAPE_HEADERS, follow_redirects=True)
-            resp.raise_for_status()
-            return resp.json()
+        resp = await _HTTP_CLIENT.get(url)
+        resp.raise_for_status()
+        return resp.json()
     except Exception as e:
         logger.warning("v5_fetch_json_failed", url=url, error=str(e))
         return None
@@ -47,21 +56,29 @@ def _channel_key(name: str) -> str:
     return re.sub(r"(^-|-$)", "", re.sub(r"[^a-z0-9]+", "-", raw))
 
 
-async def fetch_matches(sport: str = "football") -> list[KickbdMatch]:
+async def fetch_raw_matches(sport: str = "football") -> list[dict]:
     data = await _fetch_json(f"{_API_BASE}/matches/{urllib.parse.quote(sport, safe='')}")
-    if not isinstance(data, list):
-        return []
+    return data if isinstance(data, list) else []
 
+
+async def get_cached_raw_matches(sport: str = "football") -> list[dict]:
+    return await cache.get_or_set(
+        prefix=f"v5_raw_matches_{sport}", identifier=sport,
+        factory=lambda: fetch_raw_matches(sport), ttl=60,
+    )
+
+
+async def fetch_matches(sport: str = "football") -> list[KickbdMatch]:
+    data = await get_cached_raw_matches(sport)
     out: list[KickbdMatch] = []
     seen_slugs = set()
-    blocked_titles = {"24/7 South Park", "24/7 COWS"}
 
     for m in data:
         if not isinstance(m, dict) or not m.get("id"):
             continue
-        if m.get("title") in blocked_titles:
+        if m.get("title") in _BLOCKED_24_7_TITLES:
             continue
-        slug = _channel_key(m.get("title") or str(m["id"]))
+        slug = _channel_key(m.get("title") or str(m.get("id")))
         if slug in seen_slugs:
             continue
         seen_slugs.add(slug)
@@ -72,13 +89,7 @@ async def fetch_matches(sport: str = "football") -> list[KickbdMatch]:
         t2 = t.get("away") or {}
 
         name = (m.get("title") or "").strip()
-        local_posters = {
-            "Rally TV": "/V5-24:7-Assets/rallytv.webp",
-            "24/7 The Simpsons": "/V5-24:7-Assets/simpsons.webp",
-            "24/7 SpongeBob Squarepants": "/V5-24:7-Assets/SpongeBob.webp",
-            "24/7 Family Guy": "/V5-24:7-Assets/FamilyGuy.webp",
-        }
-        poster_path = local_posters.get(name) if sport == "24/7-streams" else None
+        poster_path = _24_7_POSTERS.get(name) if sport == "24/7-streams" else None
         poster = f"{_HOME}{poster_path}" if poster_path else (m.get("poster") or m.get("ppvPoster"))
 
         out.append(KickbdMatch(
@@ -102,14 +113,7 @@ async def get_cached_matches(sport: str = "football") -> list[KickbdMatch]:
 
 
 async def fetch_match_channels(slug: str, sport: str = "football") -> list[dict]:
-    matches = await get_cached_matches(sport)
-    match_item = next((m for m in matches if m.slug == slug), None)
-    if not match_item:
-        return []
-
-    data = await _fetch_json(f"{_API_BASE}/matches/{urllib.parse.quote(sport, safe='')}")
-    if not isinstance(data, list):
-        return []
+    data = await get_cached_raw_matches(sport)
 
     raw_match = None
     for m in data:
