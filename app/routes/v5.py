@@ -177,13 +177,14 @@ async def proxy_stream(t: str | None = Query(None), url: str | None = Query(None
             # HLS manifest rewriting
             if upstream.endswith(".m3u8") or "index.m3u8" in upstream or "playlist" in upstream:
                 parsed = urllib.parse.urlparse(upstream)
-                base_domain = f"{parsed.scheme}://{parsed.netloc}{parsed.path.rsplit('/', 1)[0]}"
+                origin = f"{parsed.scheme}://{parsed.netloc}"
+                base_dir = parsed.path.rsplit("/", 1)[0]
                 body = content.decode("utf-8", errors="ignore")
                 lines = []
                 for line in body.splitlines():
                     trimmed = line.strip()
-                    if trimmed and not trimmed.startswith("#") and not trimmed.startswith("http") and not trimmed.startswith("/"):
-                        full = f"{base_domain}/{trimmed}"
+                    if trimmed and not trimmed.startswith("#") and not trimmed.startswith("http"):
+                        full = f"{origin}{trimmed}" if trimmed.startswith("/") else f"{origin}{base_dir}/{trimmed}"
                         lines.append(f"{_PROXY_BASE}{urllib.parse.quote(full, safe='')}")
                     else:
                         lines.append(line)

@@ -119,7 +119,7 @@ function touchProxyToken(token) {
 }
 function cacheDomain(c) { return c.env.CACHE_INTERNAL_DOMAIN || 'kheladekho-cache.internal'; }
 function needsProxy(url, c) {
-  const patterns = (c.env.PROXY_REQUIRED_PATTERNS || 'phantemlis.top,/papi/tv/playlist/').split(',');
+  const patterns = (c.env.PROXY_REQUIRED_PATTERNS || 'phantemlis.top,/papi/tv/playlist/,/papi/tv-seg/').split(',');
   return patterns.some(p => url.includes(p));
 }
 async function getCachedOrFetch(c, key, fetchFn, ttl) {
