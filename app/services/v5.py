@@ -89,8 +89,7 @@ async def fetch_matches(sport: str = "football") -> list[KickbdMatch]:
         t2 = t.get("away") or {}
 
         name = (m.get("title") or "").strip()
-        poster_path = _24_7_POSTERS.get(name) if sport == "24/7-streams" else None
-        poster = f"{_HOME}{poster_path}" if poster_path else (m.get("poster") or m.get("ppvPoster"))
+        poster = m.get("poster") or m.get("ppvPoster")
 
         out.append(KickbdMatch(
             id=slug,
@@ -109,7 +108,23 @@ async def fetch_matches(sport: str = "football") -> list[KickbdMatch]:
 
 
 async def get_cached_matches(sport: str = "football") -> list[KickbdMatch]:
-    return await cache.get_or_set(prefix=f"v5_matches_{sport}", identifier=sport, factory=lambda: fetch_matches(sport), ttl=60)
+    return await cache.get_or_set(
+        prefix=f"v5_matches_{sport}", identifier=sport,
+        factory=lambda: fetch_matches(sport), ttl=60,
+    )
+
+
+def override_247_posters(matches: list[KickbdMatch], poster_base_url: str) -> list[KickbdMatch]:
+    if not poster_base_url:
+        return matches
+    out: list[KickbdMatch] | None = None
+    for i, m in enumerate(matches):
+        poster_path = _24_7_POSTERS.get(m.name)
+        if poster_path:
+            if out is None:
+                out = list(matches)
+            out[i] = m.model_copy(update={"poster": f"{poster_base_url}{poster_path}"})
+    return out if out is not None else matches
 
 
 async def fetch_match_channels(slug: str, sport: str = "football") -> list[dict]:

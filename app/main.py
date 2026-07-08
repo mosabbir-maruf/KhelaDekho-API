@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import structlog
 from fastapi import Depends, FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Configure structured logging before anything emits logs.
@@ -58,6 +60,12 @@ app.include_router(v1_routes.router, dependencies=_auth)
 app.include_router(v2_routes.router, dependencies=_auth)
 app.include_router(v4_routes.router, dependencies=_auth)
 app.include_router(v5_routes.router, dependencies=_auth)
+
+# Serve 24/7 poster images from the Worker's asset directory
+_PUBLIC_DIR = Path(__file__).resolve().parent.parent / "worker" / "public"
+_247_ASSETS_DIR = _PUBLIC_DIR / "V5-24:7-Assets"
+if _247_ASSETS_DIR.is_dir():
+    app.mount("/V5-24:7-Assets", StaticFiles(directory=str(_247_ASSETS_DIR)), name="247_assets")
 
 
 @app.get(

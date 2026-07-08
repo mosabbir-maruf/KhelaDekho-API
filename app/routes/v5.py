@@ -6,7 +6,7 @@ import urllib.parse
 
 import httpx
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 
 from app.config import settings
 from app.models import StandardResponse
@@ -23,6 +23,7 @@ from app.services.v5 import (
     get_cached_matches,
     get_cached_stream,
     get_cached_tv_channels,
+    override_247_posters,
     resolve_tv_channel_stream,
 )
 
@@ -73,8 +74,11 @@ def _resolve_token(token: str | None) -> str | None:
     "/matches",
     response_model=StandardResponse[KickbdMatchListResponse]
 )
-async def list_matches(live: bool = Query(False), sport: str = Query("football")):
+async def list_matches(request: Request, live: bool = Query(False), sport: str = Query("football")):
     matches = await get_cached_matches(sport)
+    if sport == "24/7-streams":
+        poster_base_url = str(request.base_url).rstrip("/")
+        matches = override_247_posters(matches, poster_base_url)
     if live:
         matches = [m for m in matches if m.is_live]
     return StandardResponse(
