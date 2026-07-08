@@ -958,6 +958,10 @@ app.get('/api/v2/proxy', async (c) => {
       signal: AbortSignal.timeout(isSegmentReq ? 15000 : 8000)
     });
     if (isSegmentReq) {
+      if (!resp.ok) {
+        const ct = resp.headers.get('content-type') || 'application/octet-stream';
+        return new Response(null, { status: 200, headers: { 'Content-Type': ct, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400' } });
+      }
       return new Response(resp.body, {
         status: resp.status,
         headers: {
@@ -1474,6 +1478,9 @@ app.get('/api/v5/proxy', async (c) => {
     }
 
     const isSegment = url.match(/\.(ts|mp4|m4s)($|\?)/) || url.includes('/seg_') || url.includes('/segment') || url.includes('/init');
+    if (isSegment && !resp.ok) {
+      return new Response(null, { status: 200, headers: { 'Content-Type': contentType, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400' } });
+    }
     const cacheMaxAge = isSegment ? 86400 : 5;
     return new Response(body, {
       status: resp.status,

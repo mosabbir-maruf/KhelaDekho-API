@@ -195,6 +195,15 @@ async def proxy_stream(t: str | None = Query(None), url: str | None = Query(None
             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to fetch stream")
 
     is_segment = any(upstream.endswith(ext) for ext in (".ts", ".mp4", ".m4s")) or "/seg_" in upstream or "/segment" in upstream or "/init" in upstream
+    if is_segment and not (200 <= resp.status_code < 300):
+        return Response(
+            content=None,
+            status_code=200,
+            headers={
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "public, max-age=86400",
+            },
+        )
     return Response(
         content=content,
         status_code=resp.status_code,

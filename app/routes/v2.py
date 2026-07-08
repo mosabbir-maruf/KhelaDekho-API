@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import urllib.parse
 
 import httpx
@@ -89,9 +90,16 @@ _PROXY_FORWARD_HEADERS = {
 
 @router.get("/proxy")
 async def proxy_stream(url: str = Query(..., min_length=10)):
+    is_segment = bool(re.search(r"\.(ts|mp4|m4s)($|\?)", url)) or "/seg_" in url or "/segment" in url or "/init" in url
     async with httpx.AsyncClient(timeout=15.0) as client:
         try:
             resp = await client.get(url, headers=_PROXY_FORWARD_HEADERS, follow_redirects=True)
+            if is_segment and not (200 <= resp.status_code < 300):
+                return Response(
+                    content=None,
+                    status_code=200,
+                    headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=86400"},
+                )
             content = resp.content
             content_type = resp.headers.get("content-type", "application/octet-stream")
         except Exception as e:
@@ -102,5 +110,5 @@ async def proxy_stream(url: str = Query(..., min_length=10)):
         content=content,
         status_code=resp.status_code,
         media_type=content_type,
-        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": "public, max-age=30"},
+        headers={"Access-Control-Allow-Origin": "*", "Cache-Control": f"public, max-age={'86400' if is_segment else '30'}"},
     )
