@@ -48,8 +48,6 @@ KhelaDekho-API/
 ├── worker/
 │   ├── src/
 │   │   └── index.js              # Cloudflare Worker (Hono) — same API at the edge
-│   ├── public/
-│   │   └── V5-24:7-Assets/       # 24/7 stream poster images (FamilyGuy.webp, rallytv.webp, simpsons.webp, SpongeBob.webp)
 │   └── wrangler.toml             # Worker env vars, secrets
 ├── run.py                        # Local uvicorn entrypoint
 ├── requirements.txt
@@ -107,8 +105,8 @@ series & entertainment channels). The slug is URL-encoded before being sent
 to the upstream provider.
 
 The `24/7-streams` sport returns 4 channels (Family Guy, The Simpsons,
-SpongeBob, Rally TV) after filtering out South Park and COWS. Each channel
-uses a custom poster image served from the Worker's `/public` directory.
+SpongeBob, Rally TV) after filtering out South Park and COWS. Poster images
+are served by the frontend (Cloudflare Pages) from `/public/V5-24:7-Assets/`.
 
 Also provides a standalone DLHD 24/7 TV channel list (878+ channels) with auto-
 categorization (Sports, News, Kids, Entertainment, Music, General).
@@ -124,9 +122,6 @@ categorization (Sports, News, Kids, Entertainment, Music, General).
 
 All v5 streams are routed through the proxy to keep Referer/Origin headers fresh
 and rewrite tokenized manifests. TV channel streams have no rate limit.
-
-The Worker serves static poster assets from `worker/public/V5-24:7-Assets/`,
-available at `{V5_HOME_URL}/V5-24:7-Assets/{name}.webp`.
 
 ---
 

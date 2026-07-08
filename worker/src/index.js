@@ -1173,14 +1173,8 @@ function v5ChannelKey(name) {
 }
 
 const V5_BLOCKED_TITLES = new Set(["24/7 South Park", "24/7 COWS"]);
-const V5_POSTER_247_MAP = {
-  'Rally TV': '/V5-24:7-Assets/rallytv.webp',
-  '24/7 The Simpsons': '/V5-24:7-Assets/simpsons.webp',
-  '24/7 SpongeBob Squarepants': '/V5-24:7-Assets/SpongeBob.webp',
-  '24/7 Family Guy': '/V5-24:7-Assets/FamilyGuy.webp',
-};
 
-async function fetchV5Matches(homeUrl, sport, selfOrigin) {
+async function fetchV5Matches(homeUrl, sport) {
   const data = await fetchJson(`${homeUrl}/papi/matches/${encodeURIComponent(sport || 'football')}`);
   if (!Array.isArray(data)) return [];
 
@@ -1199,8 +1193,6 @@ async function fetchV5Matches(homeUrl, sport, selfOrigin) {
     const t2 = teams.away || {};
 
     const name = (m.title || '').trim();
-    const posterPath = sport === '24/7-streams' && V5_POSTER_247_MAP[name];
-    const poster247 = posterPath ? `${selfOrigin}${posterPath}` : null;
 
     out.push({
       id: slug,
@@ -1211,7 +1203,7 @@ async function fetchV5Matches(homeUrl, sport, selfOrigin) {
       is_live: m.status === 'live',
       start_date: m.date || null,
       end_date: null,
-      poster: poster247 || m.poster || m.ppvPoster || null,
+      poster: m.poster || m.ppvPoster || null,
       team_a: t1.name ? { name: t1.name.trim(), logo: t1.badge || null } : null,
       team_b: t2.name ? { name: t2.name.trim(), logo: t2.badge || null } : null,
       cached_at: new Date().toISOString(),
@@ -1312,10 +1304,9 @@ async function resolveV5Stream(sourceUrl, homeUrl) {
 
 app.get('/api/v5/matches', async (c) => {
   const homeUrl = getV5Home(c);
-  const selfOrigin = new URL(c.req.url).origin;
   const sport = c.req.query('sport') || 'football';
   const cacheKey = `v5_matches_${sport}`;
-  const matches = await getCachedOrFetch(c, cacheKey, () => fetchV5Matches(homeUrl, sport, selfOrigin), 60);
+  const matches = await getCachedOrFetch(c, cacheKey, () => fetchV5Matches(homeUrl, sport), 60);
   const list = c.req.query('live') === 'true' ? matches.filter(m => m.is_live) : matches;
   return c.json(makeResponse(true, { matches: list, total: list.length, cached_at: new Date().toISOString() }));
 });

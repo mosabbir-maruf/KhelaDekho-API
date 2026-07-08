@@ -32,12 +32,6 @@ _SCRAPE_HEADERS = {
 
 _HTTP_CLIENT = httpx.AsyncClient(timeout=15.0, headers=_SCRAPE_HEADERS, follow_redirects=True)
 
-_24_7_POSTERS = {
-    "Rally TV": "/V5-24:7-Assets/rallytv.webp",
-    "24/7 The Simpsons": "/V5-24:7-Assets/simpsons.webp",
-    "24/7 SpongeBob Squarepants": "/V5-24:7-Assets/SpongeBob.webp",
-    "24/7 Family Guy": "/V5-24:7-Assets/FamilyGuy.webp",
-}
 _BLOCKED_24_7_TITLES = {"24/7 South Park", "24/7 COWS"}
 
 
@@ -112,19 +106,6 @@ async def get_cached_matches(sport: str = "football") -> list[KickbdMatch]:
         prefix=f"v5_matches_{sport}", identifier=sport,
         factory=lambda: fetch_matches(sport), ttl=60,
     )
-
-
-def override_247_posters(matches: list[KickbdMatch], poster_base_url: str) -> list[KickbdMatch]:
-    if not poster_base_url:
-        return matches
-    out: list[KickbdMatch] | None = None
-    for i, m in enumerate(matches):
-        poster_path = _24_7_POSTERS.get(m.name)
-        if poster_path:
-            if out is None:
-                out = list(matches)
-            out[i] = m.model_copy(update={"poster": f"{poster_base_url}{poster_path}"})
-    return out if out is not None else matches
 
 
 async def fetch_match_channels(slug: str, sport: str = "football") -> list[dict]:

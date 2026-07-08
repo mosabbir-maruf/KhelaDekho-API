@@ -8,8 +8,6 @@ enabled = true
 [triggers]
 crons = ["*/1 * * * *"]  # warm-up every minute to prevent cold starts
 
-assets = { directory = "public", binding = "ASSETS" }
-
 [vars]
 # Upstream base URLs (V1 = score provider, V2 = kickbd, V4 = proxybdix)
 V1_HOME_URL = "https://www.goal.com"
