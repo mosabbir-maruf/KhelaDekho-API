@@ -221,17 +221,17 @@ async def proxy_stream(t: str | None = Query(None), url: str | None = Query(None
                 "Cache-Control": "public, max-age=86400",
             },
         )
-    # Live manifests revalidate every few seconds. A single upstream blip during
-    # revalidation must NOT become a hard 502 (which makes hls.js buffer). Serve
-    # the last-good manifest while revalidating, and serve stale on any upstream
-    # 5xx, so transient provider/CDN hiccups are absorbed transparently.
-    _swr = 86400 if is_segment else 30
+    # Live manifests revalidate every few seconds (max-age=5). We intentionally
+    # do NOT use stale-while-revalidate: serving a stale live manifest makes
+    # hls.js start behind the live edge and seek/catch up, causing a visible
+    # freeze. We keep stale-if-error so a genuine upstream 5xx is absorbed by
+    # serving the last-good (<= max-age old) manifest instead of a hard 502.
     return Response(
         content=content,
         status_code=resp.status_code,
         media_type=content_type,
         headers={
             "Access-Control-Allow-Origin": "*",
-            "Cache-Control": f"public, max-age={'86400' if is_segment else '5'}, stale-while-revalidate={_swr}, stale-if-error=86400",
+            "Cache-Control": f"public, max-age={'86400' if is_segment else '5'}, stale-if-error=86400",
         },
     )
