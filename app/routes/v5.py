@@ -26,6 +26,7 @@ from app.services.v5 import (
     get_cached_matches,
     get_cached_stream,
     get_cached_tv_channels,
+    resolve_stream,
     resolve_tv_channel_stream,
 )
 
@@ -116,12 +117,12 @@ async def list_match_channels(slug: str, sport: str = Query("football")):
     "/matches/{slug}/stream",
     response_model=StandardResponse[StreamResponse]
 )
-async def get_match_stream(slug: str, ch: str = Query(..., min_length=1), sport: str = Query("football")):
+async def get_match_stream(slug: str, ch: str = Query(..., min_length=1), sport: str = Query("football"), fresh: bool = Query(False)):
     raw = await get_cached_match_channels(slug, sport)
     channel = next((c for c in raw if c["id"] == ch), None)
     if not channel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Channel not found")
-    stream = await get_cached_stream(slug, ch, channel["source_url"])
+    stream = await resolve_stream(channel["source_url"]) if fresh else await get_cached_stream(slug, ch, channel["source_url"])
     if not stream or not stream.get("stream_url"):
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Stream unavailable")
 
@@ -220,12 +221,17 @@ async def proxy_stream(t: str | None = Query(None), url: str | None = Query(None
                 "Cache-Control": "public, max-age=86400",
             },
         )
+    # Live manifests revalidate every few seconds. A single upstream blip during
+    # revalidation must NOT become a hard 502 (which makes hls.js buffer). Serve
+    # the last-good manifest while revalidating, and serve stale on any upstream
+    # 5xx, so transient provider/CDN hiccups are absorbed transparently.
+    _swr = 86400 if is_segment else 30
     return Response(
         content=content,
         status_code=resp.status_code,
         media_type=content_type,
         headers={
             "Access-Control-Allow-Origin": "*",
-            "Cache-Control": f"public, max-age={'86400' if is_segment else '5'}",
+            "Cache-Control": f"public, max-age={'86400' if is_segment else '5'}, stale-while-revalidate={_swr}, stale-if-error=86400",
         },
     )

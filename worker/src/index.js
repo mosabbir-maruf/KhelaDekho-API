@@ -1373,7 +1373,10 @@ app.get('/api/v5/matches/:slug/stream', async (c) => {
   const channel = channels.find(ch => ch.id === chId);
   if (!channel) return c.json(makeResponse(false, null, { code: 'HTTP_404', message: 'Channel not found' }), 404);
 
-  const stream = await getCachedOrFetch(c, `v5_st_${slug}_${chId}`, () => resolveV5Stream(channel.source_url, homeUrl), 45);
+  const fresh = c.req.query('fresh') === '1';
+  const stream = fresh
+    ? await resolveV5Stream(channel.source_url, homeUrl)
+    : await getCachedOrFetch(c, `v5_st_${slug}_${chId}`, () => resolveV5Stream(channel.source_url, homeUrl), 45);
   if (!stream || !stream.stream_url) return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
 
   const token = await createProxyToken(stream.stream_url, c);
@@ -1520,10 +1523,15 @@ app.get('/api/v5/proxy', async (c) => {
     if (isSegment && !resp.ok) {
       return new Response(null, { status: 200, headers: { 'Content-Type': contentType, 'Access-Control-Allow-Origin': '*', 'Cache-Control': 'public, max-age=86400' } });
     }
+    // Live manifests revalidate every few seconds. A single upstream blip during
+    // revalidation must NOT become a hard 502 (which makes hls.js buffer). Serve
+    // the last-good manifest while revalidating, and serve stale on any upstream
+    // 5xx, so transient provider/CDN hiccups are absorbed transparently.
     const cacheMaxAge = isSegment ? 86400 : 5;
+    const swr = isSegment ? 86400 : 30;
     return new Response(body, {
       status: resp.status,
-      headers: { 'Content-Type': contentType, 'Access-Control-Allow-Origin': '*', 'Cache-Control': `public, max-age=${cacheMaxAge}` },
+      headers: { 'Content-Type': contentType, 'Access-Control-Allow-Origin': '*', 'Cache-Control': `public, max-age=${cacheMaxAge}, stale-while-revalidate=${swr}, stale-if-error=86400` },
     });
   } catch (e) {
     return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Failed to fetch stream' }), 502);
