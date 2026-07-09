@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     # --- Auth: single shared API key across the project ---
     xkey: str = Field(default="", validation_alias="XKEY")
 
+    # --- Secret used to sign stateless v5 proxy tokens (HMAC-SHA256) ---
+    proxy_secret: str = Field(default="", validation_alias="PROXY_SECRET")
+
     model_config = {"extra": "ignore"}
 
 

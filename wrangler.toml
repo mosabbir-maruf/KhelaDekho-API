@@ -13,3 +13,6 @@ V1_HOME_URL = "https://www.goal.com"
 V2_HOME_URL = "https://kickbd.org"
 V4_HOME_URL = "https://tv.proxybdix.com"
 V5_HOME_URL = "https://dami-tv.pro"
+# Secret used to sign stateless v5 proxy tokens (HMAC-SHA256).
+# Set a long random value in production (e.g. `wrangler secret put PROXY_SECRET`).
+PROXY_SECRET = "dev-insecure-proxy-secret-change-me"

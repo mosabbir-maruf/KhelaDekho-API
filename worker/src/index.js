@@ -101,21 +101,59 @@ async function fetchJson(url) {
 // Unified cache helper with stale-while-revalidate + stampede protection
 const fetchPromises = new Map();
 
-// Opaque token → upstream URL mapping for the proxy, so upstream provider URLs
-// and auth tokens are never exposed to the client. Tokens auto-expire 5 min
-// after the last access so long-running streams don't break.
-const proxyTokens = new Map();
-const proxyTokenTimers = new Map();
-let tokenId = 0;
-function createProxyToken(upstreamUrl) {
-  const token = ++tokenId;
-  proxyTokens.set(token, upstreamUrl);
-  proxyTokenTimers.set(token, setTimeout(() => { proxyTokens.delete(token); proxyTokenTimers.delete(token); }, 300000));
-  return token;
+// Stateless, signed proxy tokens. The token is a self-contained, HMAC-signed
+// payload (upstream URL + expiry) so it validates on ANY Worker isolate with
+// zero shared in-memory state. This replaces the old per-isolate `Map` +
+// `setTimeout` approach, which broke live streams: manifest reloads (every few
+// seconds) frequently hit a different/frozen isolate where the token was
+// missing → 400 → buffering. A reload minted a fresh token, so playback
+// resumed until that isolate was evicted again ("buffers after a while").
+function b64urlEncode(bytes) {
+  const str = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+  return str.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
-function touchProxyToken(token) {
-  const timer = proxyTokenTimers.get(token);
-  if (timer) { clearTimeout(timer); proxyTokenTimers.set(token, setTimeout(() => { proxyTokens.delete(token); proxyTokenTimers.delete(token); }, 300000)); }
+function b64urlEncodeStr(s) { return b64urlEncode(new TextEncoder().encode(s)); }
+function b64urlDecode(s) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+const PROXY_TOKEN_TTL = 86400; // 24h — covers full live-viewing sessions
+let _proxyKeyCache = null;
+let _proxyKeySecret = null;
+async function getProxyKey(c) {
+  const secret = (c.env && c.env.PROXY_SECRET) || 'dev-insecure-proxy-secret-change-me';
+  if (_proxyKeyCache && _proxyKeySecret === secret) return _proxyKeyCache;
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
+  _proxyKeyCache = key;
+  _proxyKeySecret = secret;
+  return key;
+}
+async function createProxyToken(upstreamUrl, c) {
+  const payload = JSON.stringify({ u: upstreamUrl, exp: Math.floor(Date.now() / 1000) + PROXY_TOKEN_TTL });
+  const body = b64urlEncodeStr(payload);
+  const key = await getProxyKey(c);
+  const sig = b64urlEncode(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body)));
+  return `${body}.${sig}`;
+}
+async function resolveProxyToken(token, c) {
+  if (!token || typeof token !== 'string' || token.indexOf('.') === -1) return null;
+  const dot = token.lastIndexOf('.');
+  const body = token.slice(0, dot);
+  const sig = token.slice(dot + 1);
+  try {
+    const key = await getProxyKey(c);
+    const valid = await crypto.subtle.verify('HMAC', key, b64urlDecode(sig), new TextEncoder().encode(body));
+    if (!valid) return null;
+    const payload = JSON.parse(new TextDecoder().decode(b64urlDecode(body)));
+    if (!payload.u || payload.exp < Math.floor(Date.now() / 1000)) return null;
+    return payload.u;
+  } catch {
+    return null;
+  }
 }
 function cacheDomain(c) { return c.env.CACHE_INTERNAL_DOMAIN || 'kheladekho-cache.internal'; }
 function needsProxy(url, c) {
@@ -1338,7 +1376,7 @@ app.get('/api/v5/matches/:slug/stream', async (c) => {
   const stream = await getCachedOrFetch(c, `v5_st_${slug}_${chId}`, () => resolveV5Stream(channel.source_url, homeUrl), 45);
   if (!stream || !stream.stream_url) return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
 
-  const token = createProxyToken(stream.stream_url);
+  const token = await createProxyToken(stream.stream_url, c);
   const streamUrl = `/api/v5/proxy?t=${token}`;
 
   return c.json(makeResponse(true, {
@@ -1402,7 +1440,7 @@ app.get('/api/v5/tv/channel/:id/stream', async (c) => {
     return c.json(makeResponse(false, null, { code: 'HTTP_502', message: 'Stream unavailable' }), 502);
   }
 
-  const token = createProxyToken(stream.stream_url);
+  const token = await createProxyToken(stream.stream_url, c);
   const streamUrl = `/api/v5/proxy?t=${token}`;
 
   return c.json(makeResponse(true, {
@@ -1413,10 +1451,11 @@ app.get('/api/v5/tv/channel/:id/stream', async (c) => {
 });
 
 app.get('/api/v5/proxy', async (c) => {
-  const token = c.req.query('t') || c.req.query('url');
-  const isTokenBased = token && !isNaN(Number(token));
-  const url = isTokenBased ? proxyTokens.get(Number(token)) : token;
-  if (isTokenBased) touchProxyToken(Number(token));
+  const token = c.req.query('t');
+  const urlParam = c.req.query('url');
+  let url = null;
+  if (token) url = await resolveProxyToken(token, c);
+  else if (urlParam) url = urlParam;
   if (!url || url.length < 10) return c.json(makeResponse(false, null, { code: 'HTTP_400', message: 'Invalid proxy request' }), 400);
 
   const homeUrl = getV5Home(c);

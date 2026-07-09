@@ -118,10 +118,17 @@ categorization (Sports, News, Kids, Entertainment, Music, General).
 | `GET /api/v5/matches/{slug}/stream?ch={id}&sport=` | Resolve one channel/substream |
 | `GET /api/v5/tv/channels` | DLHD 24/7 TV channel list (878+ channels) |
 | `GET /api/v5/tv/channel/{id}/stream` | Resolve a DLHD channel stream |
-| `GET /api/v5/proxy?t=` | Token-based proxy (upstream URL hidden behind opaque token) |
+| `GET /api/v5/proxy?t=` | Token-based proxy (upstream URL hidden behind signed token) |
 
 All v5 streams are routed through the proxy to keep Referer/Origin headers fresh
 and rewrite tokenized manifests. TV channel streams have no rate limit.
+
+**Proxy tokens are stateless and signed (HMAC-SHA256).** The stream endpoint
+mints a token that embeds the upstream URL + a 24h expiry; the proxy verifies the
+signature on every request with no shared in-memory state. This is required for
+Cloudflare Workers, whose ephemeral, non-shared isolates would otherwise lose
+per-isolate token maps and break live streams ("buffering after a while, fixed by
+reload"). Tokens are valid on **any** isolate, so manifest reloads always resolve.
 
 ---
 
@@ -133,6 +140,7 @@ Single source of truth: `app/config.py`. All variables use their natural names
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `XKEY` | Shared API key (`xkey` header) | _(empty = auth disabled)_ |
+| `PROXY_SECRET` | HMAC secret signing v5 proxy tokens | _(insecure dev fallback if unset)_ |
 | `V1_HOME_URL` | Score-provider base URL | — |
 | `V2_HOME_URL` | V2 channel-provider base URL | — |
 | `V4_HOME_URL` | V4 channel-provider base URL | — |
@@ -195,9 +203,21 @@ Point the frontend at it during development by setting
 # Set upstreams in wrangler.toml under [vars]:
 #   V1_HOME_URL, V2_HOME_URL, V4_HOME_URL, V5_HOME_URL
 # Optional: ENVIRONMENT = "development" for verbose local logs
-wrangler secret put XKEY     # shared API key (never commit it)
+wrangler secret put XKEY         # shared API key (never commit it)
+wrangler secret put PROXY_SECRET # HMAC secret for v5 proxy tokens (REQUIRED in prod)
 npm run deploy
 ```
+
+Generate a strong `PROXY_SECRET` (any of these; use a fresh, unique value):
+
+```bash
+openssl rand -hex 32
+# or: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+# or: python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+If you run **both** the Worker and the Python backend, set the **same** `PROXY_SECRET`
+on each — tokens signed by one must verify on the other.
 
 ---
 

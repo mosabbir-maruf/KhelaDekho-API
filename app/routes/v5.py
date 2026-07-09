@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-import threading
+import base64
+import hashlib
+import hmac
+import json
 import time
 import urllib.parse
 
@@ -33,38 +36,51 @@ router = APIRouter(prefix="/api/v5")
 _HOME = settings.v5_home_url.rstrip("/") if settings.v5_home_url else ""
 _PROXY_BASE = "/api/v5/proxy?url="
 
-# Opaque token -> upstream URL mapping, so upstream provider URLs and auth
-# tokens are never exposed to the client. Tokens expire 5 minutes after the
-# last access so long-running streams don't break.
-_TOKEN_TTL = 300
-_proxy_tokens: dict[int, tuple[str, float]] = {}
-_token_lock = threading.Lock()
-_token_id = 0
+# Stateless, signed proxy tokens. The token is a self-contained, HMAC-signed
+# payload (upstream URL + expiry) so it validates on any worker/process with no
+# shared in-memory state. This replaces the old in-memory dict + lock + TTL
+# "touch" approach, which broke live streams: manifest reloads (every few
+# seconds) frequently hit a different process/isolate where the token was
+# missing -> 400 -> buffering. A reload minted a fresh token, so playback
+# resumed until that process was recycled ("buffers after a while").
+_TOKEN_TTL = 86400  # 24h — covers full live-viewing sessions
 
 
-def _create_proxy_token(upstream_url: str) -> int:
-    global _token_id
-    with _token_lock:
-        _token_id += 1
-        tid = _token_id
-        _proxy_tokens[tid] = (upstream_url, time.time())
-    return tid
+def _proxy_secret() -> bytes:
+    return (settings.proxy_secret or "dev-insecure-proxy-secret-change-me").encode()
+
+
+def _b64url_encode(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _b64url_decode(s: str) -> bytes:
+    pad = "=" * (-len(s) % 4)
+    return base64.urlsafe_b64decode(s + pad)
+
+
+def _create_proxy_token(upstream_url: str) -> str:
+    exp = int(time.time()) + _TOKEN_TTL
+    payload = json.dumps({"u": upstream_url, "exp": exp}, separators=(",", ":")).encode()
+    body = _b64url_encode(payload)
+    sig = _b64url_encode(hmac.new(_proxy_secret(), body.encode(), hashlib.sha256).digest())
+    return f"{body}.{sig}"
 
 
 def _resolve_token(token: str | None) -> str | None:
-    if not token:
+    if not token or "." not in token:
         return None
     try:
-        tid = int(token)
-    except (ValueError, TypeError):
-        return None
-    with _token_lock:
-        entry = _proxy_tokens.get(tid)
-        if not entry:
+        body, sig = token.rsplit(".", 1)
+        expected = _b64url_encode(hmac.new(_proxy_secret(), body.encode(), hashlib.sha256).digest())
+        if not hmac.compare_digest(expected, sig):
             return None
-        # Extend TTL on each access (touch)
-        _proxy_tokens[tid] = (entry[0], time.time())
-        return entry[0]
+        payload = json.loads(_b64url_decode(body))
+        if not isinstance(payload.get("u"), str) or int(payload.get("exp", 0)) < int(time.time()):
+            return None
+        return payload["u"]
+    except Exception:
+        return None
 
 
 # ---- Match endpoints ----
